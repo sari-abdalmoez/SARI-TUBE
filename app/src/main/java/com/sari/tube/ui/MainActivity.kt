@@ -92,26 +92,35 @@ fun HomeScreen(onDownload: (String) -> Unit) {
         )
         Spacer(Modifier.height(40.dp))
 
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "الصق رابط الفيديو هنا",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(onClick = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                clipboard?.primaryClip
+                    ?.takeIf { it.itemCount > 0 }
+                    ?.getItemAt(0)
+                    ?.coerceToText(context)
+                    ?.toString()
+                    ?.let { text = it }
+            }) {
+                Text("لصق", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+
         OutlinedTextField(
             value = text,
             onValueChange = { text = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("الصق رابط الفيديو هنا") },
             singleLine = true,
-            shape = RoundedCornerShape(24.dp),
-            trailingIcon = {
-                TextButton(onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                    clipboard?.primaryClip
-                        ?.takeIf { it.itemCount > 0 }
-                        ?.getItemAt(0)
-                        ?.coerceToText(context)
-                        ?.toString()
-                        ?.let { text = it }
-                }) {
-                    Text("لصق", color = MaterialTheme.colorScheme.primary)
-                }
-            }
+            shape = RoundedCornerShape(24.dp)
         )
         Spacer(Modifier.height(16.dp))
 
