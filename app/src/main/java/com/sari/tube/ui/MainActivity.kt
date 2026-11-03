@@ -1,6 +1,8 @@
 package com.sari.tube.ui
 
 import android.Manifest
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -15,7 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,7 +66,7 @@ fun SariTheme(content: @Composable () -> Unit) {
 @Composable
 fun HomeScreen(onDownload: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
-    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     val valid = UrlParser.firstHttpUrl(text) != null || DoodResolver.extractId(text) != null
 
     Column(
@@ -98,7 +100,15 @@ fun HomeScreen(onDownload: (String) -> Unit) {
             singleLine = true,
             shape = RoundedCornerShape(24.dp),
             trailingIcon = {
-                TextButton(onClick = { clipboard.getText()?.text?.let { text = it } }) {
+                TextButton(onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    clipboard?.primaryClip
+                        ?.takeIf { it.itemCount > 0 }
+                        ?.getItemAt(0)
+                        ?.coerceToText(context)
+                        ?.toString()
+                        ?.let { text = it }
+                }) {
                     Text("لصق", color = MaterialTheme.colorScheme.primary)
                 }
             }
