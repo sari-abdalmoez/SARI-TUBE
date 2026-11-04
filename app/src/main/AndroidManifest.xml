@@ -6,7 +6,6 @@
 
     <application
         android:name=".SariTubeApp"
-        android:extractNativeLibs="true"
         android:allowBackup="false"
         android:label="SARI TUBE"
         android:supportsRtl="true"

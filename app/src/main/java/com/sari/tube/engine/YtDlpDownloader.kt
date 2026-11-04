@@ -1,6 +1,5 @@
 package com.sari.tube.engine
 
-import com.yausername.youtubedl_android.DownloadProgressCallback
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -81,11 +80,20 @@ object YtDlpDownloader {
         }.apply { isDaemon = true; start() }
 
         try {
-            YoutubeDL.getInstance().execute(request, processId, object : DownloadProgressCallback {
-                override fun onProgressUpdate(progress: Float, etaInSeconds: Long) {
-                    onProgress(progress, etaInSeconds)
-                }
-            })
+            YoutubeDL.getInstance().execute(
+                request = request,
+                processId = processId,
+                redirectErrorStream = false
+            ) { progress, etaInSeconds, _ ->
+                onProgress(progress, etaInSeconds)
+            }
+        } catch (e: YoutubeDL.CanceledException) {
+            if (control.isCancelled) throw DownloadCancelledException()
+            throw IOException("تم إيقاف عملية yt-dlp", e)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            if (control.isCancelled) throw DownloadCancelledException()
+            throw IOException("تمت مقاطعة التحميل", e)
         } catch (e: YoutubeDLException) {
             if (control.isCancelled) throw DownloadCancelledException()
             throw IOException(friendly(e.message))
