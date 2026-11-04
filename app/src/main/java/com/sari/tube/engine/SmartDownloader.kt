@@ -250,6 +250,7 @@ class SmartDownloader(
             val n = input.read(buf)
             if (n < 0) break
             out.write(buf, 0, n)
+            RateLimiter.consume(n)
             onChunk()
         }
     }
