@@ -1,5 +1,6 @@
 package com.sari.tube.engine
 
+import android.util.Log
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -36,6 +37,7 @@ object YtDlpSearch {
         try {
             runSearch(query, count)
         } catch (e: YoutubeDLException) {
+            Log.w("SariTube", "yt-dlp search failed for \"$query\": ${e.message}")
             val ctx = YtDlpEngine.appContext
             if (looksLikeExtractorBreak(e.message) && ctx != null) {
                 // غالباً غيّر يوتيوب شيئاً في الاستخراج: نحدّث المستخرج مرة واحدة ثم نعيد المحاولة.
@@ -73,7 +75,7 @@ object YtDlpSearch {
                 addOption("--skip-download")
                 addOption("--no-warnings")
             }
-            YoutubeDL.getInstance().execute(request, processId)
+            YtDlpLock.shared { YoutubeDL.getInstance().execute(request, processId) }
         } catch (e: YoutubeDLException) {
             if (timedOut.get()) throw SearchException("انتهت مهلة البحث، تحقق من الاتصال")
             throw e

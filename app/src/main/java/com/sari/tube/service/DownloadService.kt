@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.sari.tube.engine.AppPrefs
 import com.sari.tube.engine.Candidate
@@ -14,8 +15,10 @@ import com.sari.tube.engine.DownloadEvent
 import com.sari.tube.engine.MediaResolver
 import com.sari.tube.engine.SmartDownloader
 import com.sari.tube.engine.UrlParser
+import com.sari.tube.engine.YtBlockedException
 import com.sari.tube.engine.YtDlpDownloader
 import com.sari.tube.engine.YtDlpEngine
+import com.sari.tube.engine.YtDlpException
 import com.sari.tube.engine.YtQuality
 import com.sari.tube.storage.HistoryStore
 import com.sari.tube.storage.PublicSaver
@@ -30,13 +33,14 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Runs downloads in the background, with notifications for progress, completion and location. */
+/** Runs downloads in the background, with notifications for progress, completion and failure. */
 class DownloadService : Service() {
     companion object {
         const val EXTRA_INPUT = "input"
         const val EXTRA_ID = "id"
         const val EXTRA_QUALITY = "quality"
         const val ACTION_CANCEL = "com.sari.tube.CANCEL"
+        private const val TAG = "SariTube"
 
         fun start(context: Context, input: String, quality: YtQuality = YtQuality.BEST) {
             val intent = Intent(context, DownloadService::class.java)
@@ -89,15 +93,13 @@ class DownloadService : Service() {
             waitForSlot(id, control)
             holdsSlot = true
 
-            val url = UrlParser.firstHttpUrl(input) ?: input.trim()
-            if (YtDlpDownloader.isYouTube(url)) {
-                downloadYouTube(id, url, control, quality)
-            } else {
-                downloadDirect(id, input, control)
-            }
+            val url = UrlParser.firstHttpUrl(input)
+            if (url != null) downloadSmart(id, input, url, control, quality)
+            else downloadDirect(id, input, control)
         } catch (e: DownloadCancelledException) {
             notifier.cancelled(id)
         } catch (e: Exception) {
+            Log.e(TAG, "download failed (id=$id, input=$input)", e)
             notifier.failed(id, e.message ?: "خطأ غير معروف")
         } finally {
             if (holdsSlot) activeSlots.decrementAndGet()
@@ -109,17 +111,43 @@ class DownloadService : Service() {
         }
     }
 
-    private suspend fun downloadYouTube(id: Int, url: String, control: DownloadControl, quality: YtQuality) {
+    /**
+     * yt-dlp is tried first for every link. A blocked item stops here, because another engine
+     * cannot bypass a private, removed, or login-only item. An unsupported site or an extraction
+     * failure falls back to the direct engine.
+     */
+    private suspend fun downloadSmart(
+        id: Int, input: String, url: String, control: DownloadControl, quality: YtQuality
+    ) {
+        try {
+            downloadWithYtDlp(id, url, control, quality)
+        } catch (e: DownloadCancelledException) {
+            throw e
+        } catch (e: YtBlockedException) {
+            throw e
+        } catch (e: YtDlpException) {
+            Log.w(TAG, "yt-dlp failed, using fallback engine: ${e.message}")
+            try {
+                downloadDirect(id, input, control)
+            } catch (fallback: DownloadCancelledException) {
+                throw fallback
+            } catch (fallback: Exception) {
+                throw IOException("${e.message}\nالمحرك الاحتياطي: ${fallback.message}")
+            }
+        }
+    }
+
+    private suspend fun downloadWithYtDlp(id: Int, url: String, control: DownloadControl, quality: YtQuality) {
         notifier.progress(id, "جارٍ تجهيز التحميل…", 0, 0, 0, indeterminate = true)
-        if (!YtDlpEngine.awaitReady()) throw IOException("محرك التحميل لم يجهز بعد، حاول لاحقاً")
+        if (!YtDlpEngine.awaitReady()) throw YtDlpException("محرك yt-dlp لم يجهز بعد")
 
         var last = 0L
         val file = YtDlpDownloader.download(url, File(cacheDir, "ytdl"), control, quality) { percent, eta ->
             val now = System.currentTimeMillis()
             if (now - last >= 1000) {
                 last = now
-                val suffix = if (eta > 0) " — متبقٍ ${eta}s" else ""
-                notifier.progress(id, "جارٍ التحميل ${percent.toInt()}%$suffix", 0, 0, 0, indeterminate = true)
+                val remaining = if (eta > 0) "  •  متبقٍ ${eta} ث" else ""
+                notifier.percent(id, "تحميل الوسائط", percent.toInt(), "${percent.toInt()}%$remaining")
             }
         }
         finishFile(id, file, file.name, YtDlpDownloader.mimeFor(file.name))
@@ -127,7 +155,7 @@ class DownloadService : Service() {
 
     private suspend fun downloadDirect(id: Int, input: String, control: DownloadControl) {
         val dir = File(cacheDir, "dl").apply { mkdirs() }
-        // اسم ثابت لكل رابط حتى يمكن استئناف الأجزاء بعد فشل أو إعادة تشغيل.
+        // A stable name per link lets a partial download resume after a failure or restart.
         val temp = File(dir, "dl_${input.trim().hashCode().toUInt()}.bin")
 
         notifier.progress(id, "جارٍ تحليل الرابط…", 0, 0, 0, indeterminate = true)
@@ -143,16 +171,17 @@ class DownloadService : Service() {
         File(temp.parentFile, temp.name + ".parts").deleteRecursively()
     }
 
-    /** ينسخ الملف إلى التنزيلات، يسجله في القائمة، ثم يحذف النسخة المؤقتة. */
+    /** Copies the file to Downloads, records it in history, then removes the temporary copy. */
     private fun finishFile(id: Int, src: File, name: String, mime: String) {
         val uri = PublicSaver.save(this, src, name, mime)
-        // تسجيل السجل لا يجب أن يجعل التحميل الناجح يبدو فاشلاً.
+        // A history failure must not make a successful download look failed.
         runCatching { HistoryStore.add(this, src, name, mime, uri.toString()) }
+            .onFailure { Log.w(TAG, "history record failed", it) }
         src.delete()
         notifier.done(id, name, PublicSaver.FOLDER, uri, mime)
     }
 
-    /** ينتظر في الطابور حتى يصبح عدد التحميلات النشطة أقل من الحد المختار. */
+    /** Waits in the queue until fewer downloads than the chosen limit are running. */
     private suspend fun waitForSlot(id: Int, control: DownloadControl) {
         var announced = false
         while (true) {
@@ -168,7 +197,7 @@ class DownloadService : Service() {
         }
     }
 
-    /** يجرب كل مرشح بالترتيب. الجولة الثانية تعيد حل الروابط التي ربما انتهت صلاحيتها. */
+    /** Tries each candidate in order. The second round re-resolves links that may have expired. */
     private fun fetchFirstWorking(
         input: String,
         temp: File,
@@ -192,6 +221,7 @@ class DownloadService : Service() {
                 } catch (e: DownloadCancelledException) {
                     throw e
                 } catch (e: Exception) {
+                    Log.w(TAG, "direct candidate ${c.label} failed: ${e.message}")
                     lastError = "${c.label}: ${e.message ?: "فشل"}"
                 }
             }

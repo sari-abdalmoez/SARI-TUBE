@@ -62,6 +62,28 @@ class DownloadNotifier(private val context: Context) {
         )
     }
 
+    /** Shows a real percentage bar. yt-dlp reports a percent, not bytes. */
+    fun percent(id: Int, title: String, pct: Int, text: String) {
+        nm.notify(
+            id,
+            base(CH_PROGRESS)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setOngoing(true)
+                .setProgress(100, pct.coerceIn(0, 100), false)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "إلغاء", cancelIntent(id))
+                .build()
+        )
+    }
+
+    private fun cancelIntent(id: Int): PendingIntent = PendingIntent.getService(
+        context, id,
+        Intent(context, DownloadService::class.java)
+            .setAction(DownloadService.ACTION_CANCEL)
+            .putExtra(DownloadService.EXTRA_ID, id),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+    )
+
     fun done(id: Int, name: String, folder: String, uri: Uri, mime: String) {
         val open = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, mime)

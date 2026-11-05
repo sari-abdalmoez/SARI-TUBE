@@ -4,6 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// تحقق من آخر إصدار في: https://github.com/yausername/youtubedl-android/releases
+val youtubedlVersion = "0.17.5"
+
 android {
     namespace = "com.sari.tube"
     compileSdk = 35
@@ -12,8 +15,8 @@ android {
         applicationId = "com.sari.tube"
         minSdk = 29
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 6
+        versionName = "0.4.2"
     }
 
     buildFeatures { compose = true }
@@ -24,6 +27,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
+    // APK منفصل لكل معمارية لتقليل الحجم.
     splits {
         abi {
             isEnable = true
@@ -33,6 +37,7 @@ android {
         }
     }
 
+    // مكتبة youtubedl-android تستخرج بيئة Python من الـ APK، وهذا الإعداد مطلوب لذلك.
     packaging {
         jniLibs { useLegacyPackaging = true }
     }
@@ -46,9 +51,11 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("io.coil-kt:coil-compose:2.7.0")
 
-    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
-    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+    // yt-dlp مع بيئة Python، و FFmpeg لدمج الفيديو والصوت.
+    implementation("com.github.yausername.youtubedl-android:library:$youtubedlVersion")
+    implementation("com.github.yausername.youtubedl-android:ffmpeg:$youtubedlVersion")
 }

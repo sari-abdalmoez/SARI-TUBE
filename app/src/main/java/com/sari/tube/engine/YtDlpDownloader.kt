@@ -1,12 +1,22 @@
 package com.sari.tube.engine
 
+import android.util.Log
+import com.yausername.youtubedl_android.DownloadProgressCallback
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.io.File
 import java.io.IOException
-import java.net.URI
 import java.util.concurrent.atomic.AtomicBoolean
+
+/** Failure of the yt-dlp engine. The caller may try the fallback engine. */
+open class YtDlpException(message: String) : IOException(message)
+
+/** The site is not known to yt-dlp. Fallback is useful here. */
+class YtUnsupportedException(message: String) : YtDlpException(message)
+
+/** Access is blocked (private, removed, login required, region). Other engines will not help. */
+class YtBlockedException(message: String) : YtDlpException(message)
 
 enum class YtQuality(val format: String) {
     BEST("bv*+ba/b"),
@@ -17,17 +27,11 @@ enum class YtQuality(val format: String) {
 }
 
 object YtDlpDownloader {
-    private val ID_REGEX = Regex("""(?:v=|youtu\.be/|shorts/|embed/)([A-Za-z0-9_-]{6,})""")
+    private const val TAG = "SariTube"
     private val FRAGMENT_REGEX = Regex("""\.f\d+\.""")
     private val OUTPUT_EXT = setOf("mp4", "mkv", "webm", "m4a", "mp3", "ogg", "opus")
 
-    fun isYouTube(url: String): Boolean {
-        val host = runCatching { URI(url).host.orEmpty().lowercase() }.getOrDefault("")
-        return host == "youtu.be" || host.endsWith("youtube.com")
-    }
-
-    fun videoId(url: String): String =
-        ID_REGEX.find(url)?.groupValues?.get(1) ?: url.hashCode().toUInt().toString()
+    fun idFor(url: String): String = url.hashCode().toUInt().toString()
 
     fun mimeFor(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
         "mp4" -> "video/mp4"
@@ -40,9 +44,8 @@ object YtDlpDownloader {
     }
 
     /**
-     * يحمّل فيديو واحداً إلى outDir.
-     * الاسم ثابت لكل فيديو، فإذا انقطع التحميل يكمل yt-dlp من ملف .part نفسه عند إعادة المحاولة.
-     * يرفع IOException مع رسالة مفهومة، و DownloadCancelledException عند الإلغاء.
+     * Downloads one item to outDir. Blocking: call from Dispatchers.IO.
+     * The file name is stable per URL, so yt-dlp can resume a partial download on the next attempt.
      */
     fun download(
         url: String,
@@ -52,7 +55,7 @@ object YtDlpDownloader {
         onProgress: (percent: Float, etaSec: Long) -> Unit
     ): File {
         outDir.mkdirs()
-        val id = videoId(url)
+        val id = idFor(url)
         val processId = "dl-$id"
         val template = File(outDir, "${id}_%(title)s.%(ext)s").absolutePath
 
@@ -67,9 +70,9 @@ object YtDlpDownloader {
             addOption("--newline")
         }
 
-        // مراقب يوقف العملية عند إلغاء المستخدم. yt-dlp لا يستجيب للإلغاء وحده.
+        // yt-dlp does not react to cancellation on its own, so a watcher stops the process.
         val finished = AtomicBoolean(false)
-        val watcher = Thread {
+        Thread {
             while (!finished.get()) {
                 if (control.isCancelled) {
                     runCatching { YoutubeDL.getInstance().destroyProcessById(processId) }
@@ -80,23 +83,18 @@ object YtDlpDownloader {
         }.apply { isDaemon = true; start() }
 
         try {
-            YoutubeDL.getInstance().execute(
-                request = request,
-                processId = processId,
-                redirectErrorStream = false
-            ) { progress, etaInSeconds, _ ->
-                onProgress(progress, etaInSeconds)
+            YtDlpLock.shared {
+                YoutubeDL.getInstance().execute(request, processId, object : DownloadProgressCallback {
+                    override fun onProgressUpdate(progress: Float, etaInSeconds: Long) {
+                        onProgress(progress, etaInSeconds)
+                    }
+                })
             }
-        } catch (e: YoutubeDL.CanceledException) {
-            if (control.isCancelled) throw DownloadCancelledException()
-            throw IOException("تم إيقاف عملية yt-dlp", e)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            if (control.isCancelled) throw DownloadCancelledException()
-            throw IOException("تمت مقاطعة التحميل", e)
         } catch (e: YoutubeDLException) {
             if (control.isCancelled) throw DownloadCancelledException()
-            throw IOException(friendly(e.message))
+            val classified = classify(e.message.orEmpty())
+            Log.w(TAG, "yt-dlp download failed for $url: ${e.message}")
+            throw classified
         } finally {
             finished.set(true)
         }
@@ -105,18 +103,40 @@ object YtDlpDownloader {
         return findOutput(outDir, id)
     }
 
-    /** يختار الملف النهائي ويتجاهل ملفات الأجزاء المؤقتة مثل .f137.mp4 و .part. */
+    /** Turns raw yt-dlp output into a message the user can act on, and decides whether to fall back. */
+    private fun classify(raw: String): YtDlpException {
+        val firstLine = raw.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().take(160)
+        return when {
+            raw.contains("Unsupported URL", true) ->
+                YtUnsupportedException("الموقع غير مدعوم من yt-dlp")
+            raw.contains("Private video", true) ->
+                YtBlockedException("الفيديو خاص ولا يمكن تنزيله")
+            raw.contains("Video unavailable", true) || raw.contains("has been removed", true) ->
+                YtBlockedException("الفيديو غير متاح أو تم حذفه")
+            raw.contains("members only", true) || raw.contains("Sign in", true) ->
+                YtBlockedException("المحتوى يتطلب تسجيل دخول، والتطبيق لا يتجاوز ذلك")
+            raw.contains("not available in your country", true) ||
+                (raw.contains("geo", true) && raw.contains("restrict", true)) ->
+                YtBlockedException("المحتوى غير متاح في منطقتك")
+            raw.contains("HTTP Error 429", true) ->
+                YtDlpException("الموقع يحد الطلبات مؤقتاً، جرّب بعد قليل")
+            raw.contains("HTTP Error 403", true) ->
+                YtDlpException("رفض الموقع الطلب (403)، وقد يحتاج المحرك إلى تحديث")
+            raw.contains("SSL", true) ->
+                YtDlpException("تعذّر التحقق من شهادة SSL للموقع")
+            else -> YtDlpException("فشل الاستخراج: $firstLine")
+        }
+    }
+
+    /** Picks the final file and ignores fragments such as .f137.mp4 and .part files. */
     private fun findOutput(dir: File, id: String): File {
         val file = dir.listFiles { f ->
             f.name.startsWith("${id}_") &&
                 f.extension.lowercase() in OUTPUT_EXT &&
                 !FRAGMENT_REGEX.containsMatchIn(f.name)
         }?.maxByOrNull { it.length() }
-            ?: throw IOException("لم يُنتج yt-dlp ملفاً نهائياً. ربما الفيديو غير متاح أو يحتاج تسجيل دخول")
-        if (file.length() < 1024) throw IOException("الملف الناتج صغير جداً وغير صالح")
+            ?: throw YtDlpException("لم يُنتج yt-dlp ملفاً نهائياً")
+        if (file.length() < 1024) throw YtDlpException("الملف الناتج صغير جداً وغير صالح")
         return file
     }
-
-    private fun friendly(msg: String?): String =
-        "فشل التحميل: " + msg.orEmpty().lineSequence().firstOrNull().orEmpty().take(180)
 }

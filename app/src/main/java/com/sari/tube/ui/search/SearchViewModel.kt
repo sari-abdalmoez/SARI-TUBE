@@ -42,6 +42,8 @@ class SearchViewModel : ViewModel() {
 
     private var searchJob: Job? = null
     private var debounceJob: Job? = null
+    /** Each search gets a number. Only the newest one may update the UI, so old results never appear. */
+    private var requestSeq = 0
 
     /** ذاكرة صغيرة: تكرار نفس الاستعلام يعرض النتائج فوراً. */
     private val cache = object : LinkedHashMap<String, List<VideoItem>>(16, 0.75f, true) {
@@ -68,12 +70,21 @@ class SearchViewModel : ViewModel() {
         tab = selected
     }
 
+    /** Starts a search from outside the screen (for example, the home screen's single field). */
+    fun startSearch(q: String) {
+        query = q
+        debounceJob?.cancel()
+        submit()
+    }
+
     fun submit() {
         val q = query.trim()
         if (q.isEmpty()) return
 
-        // الاستعلام الجديد يلغي البحث السابق فوراً (يوقف عملية yt-dlp أيضاً).
+        // A new request cancels the previous one, which also stops its yt-dlp process.
         searchJob?.cancel()
+        val seq = ++requestSeq
+
         cache[q]?.let {
             state = SearchUiState.Ready(it)
             return
@@ -84,13 +95,13 @@ class SearchViewModel : ViewModel() {
             try {
                 val items = YtDlpSearch.search(q)
                 cache[q] = items
-                state = SearchUiState.Ready(items)
+                if (seq == requestSeq) state = SearchUiState.Ready(items)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SearchException) {
-                state = SearchUiState.Failed(e.message ?: "فشل البحث")
+                if (seq == requestSeq) state = SearchUiState.Failed(e.message ?: "فشل البحث")
             } catch (e: Exception) {
-                state = SearchUiState.Failed("خطأ غير متوقع: ${e.message}")
+                if (seq == requestSeq) state = SearchUiState.Failed("خطأ غير متوقع: ${e.message}")
             }
         }
     }

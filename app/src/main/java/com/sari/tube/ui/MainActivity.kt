@@ -12,11 +12,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -49,18 +50,31 @@ class MainActivity : ComponentActivity() {
         setContent {
             SariTheme {
                 var screen by rememberSaveable { mutableStateOf(SCREEN_HOME) }
+                var pendingQuery by rememberSaveable { mutableStateOf("") }
                 when (screen) {
                     SCREEN_DOWNLOADS -> DownloadsScreen(onBack = { screen = SCREEN_HOME })
                     SCREEN_SETTINGS -> SettingsScreen(onBack = { screen = SCREEN_HOME })
-                    SCREEN_SEARCH -> SearchScreen(
-                        vm = viewModel<SearchViewModel>(),
-                        onBack = { screen = SCREEN_HOME },
-                        onDownload = { item -> startDownload(item.url) }
-                    )
+                    SCREEN_SEARCH -> {
+                        val vm = viewModel<SearchViewModel>()
+                        LaunchedEffect(pendingQuery) {
+                            if (pendingQuery.isNotBlank()) {
+                                vm.startSearch(pendingQuery)
+                                pendingQuery = ""
+                            }
+                        }
+                        SearchScreen(
+                            vm = vm,
+                            onBack = { screen = SCREEN_HOME },
+                            onDownload = { item -> startDownload(item.url) }
+                        )
+                    }
                     else -> HomeScreen(
                         onOpenDownloads = { screen = SCREEN_DOWNLOADS },
                         onOpenSettings = { screen = SCREEN_SETTINGS },
-                        onSearch = { screen = SCREEN_SEARCH },
+                        onSearch = { q ->
+                            pendingQuery = q
+                            screen = SCREEN_SEARCH
+                        },
                         onDownload = { url -> startDownload(url) }
                     )
                 }
@@ -100,12 +114,14 @@ fun SariTheme(content: @Composable () -> Unit) {
 fun HomeScreen(
     onOpenDownloads: () -> Unit,
     onOpenSettings: () -> Unit,
-    onSearch: () -> Unit,
+    onSearch: (String) -> Unit,
     onDownload: (String) -> Unit
 ) {
     var text by rememberSaveable { mutableStateOf("") }
     val clipboard = LocalClipboardManager.current
-    val valid = UrlParser.firstHttpUrl(text) != null || DoodResolver.extractId(text) != null
+    val trimmed = text.trim()
+    // A link starts a download. Anything else is a search phrase.
+    val isLink = UrlParser.firstHttpUrl(trimmed) != null || DoodResolver.extractId(trimmed) != null
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(
@@ -136,7 +152,7 @@ fun HomeScreen(
                     value = text,
                     onValueChange = { text = it },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("الصق رابط الفيديو هنا") },
+                    placeholder = { Text("ابحث عن فيديو أو ألصق رابطاً") },
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
                     trailingIcon = {
@@ -150,23 +166,19 @@ fun HomeScreen(
 
             Button(
                 onClick = {
-                    onDownload(text.trim())
+                    if (isLink) onDownload(trimmed) else onSearch(trimmed)
                     text = ""
                 },
-                enabled = valid,
+                enabled = trimmed.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(24.dp)
             ) {
-                Text("تحميل", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            }
-
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(
-                onClick = onSearch,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                Text("بحث عن فيديو أو أغنية")
+                Icon(
+                    if (isLink) Icons.Filled.KeyboardArrowDown else Icons.Filled.Search,
+                    contentDescription = null
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(if (isLink) "تنزيل" else "بحث", fontWeight = FontWeight.Bold, fontSize = 18.sp)
             }
 
             Spacer(Modifier.height(24.dp))
