@@ -20,7 +20,7 @@ jobs:
           gradle-version: 8.9
 
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+        run: gradle clean assembleDebug --no-daemon --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:

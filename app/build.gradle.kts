@@ -27,15 +27,6 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
-    // APK منفصل لكل معمارية لتقليل الحجم.
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a")
-            isUniversalApk = false
-        }
-    }
 
     // مكتبة youtubedl-android تستخرج بيئة Python من الـ APK، وهذا الإعداد مطلوب لذلك.
     packaging {
