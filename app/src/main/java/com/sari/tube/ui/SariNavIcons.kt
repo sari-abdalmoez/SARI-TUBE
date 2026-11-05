@@ -39,7 +39,7 @@ fun SariToolsIcon(
             lineTo(x2, y1 + cell / 2f)
             close()
         }
-        drawPath(diamond, tint, style)
+        drawPath(path = diamond, color = tint, style = style)
     }
 }
 
@@ -59,7 +59,7 @@ fun SariPlayIcon(
             quadraticTo(s * 0.20f, s * 0.88f, s * 0.32f, s * 0.88f)
             lineTo(s * 0.78f, s * 0.88f)
         }
-        drawPath(back, tint, style)
+        drawPath(path = back, color = tint, style = style)
 
         drawRoundRect(
             color = tint,
