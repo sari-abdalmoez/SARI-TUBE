@@ -53,16 +53,31 @@ object YtDlpDownloader {
         quality: YtQuality,
         onProgress: (percent: Float, etaSec: Long) -> Unit
     ): File {
-        outDir.mkdirs()
+        if (!outDir.exists() && !outDir.mkdirs()) {
+            throw YtDlpException("تعذر إنشاء مجلد التنزيل")
+        }
+        if (!outDir.isDirectory || !outDir.canWrite()) {
+            throw YtDlpException("مجلد التنزيل غير قابل للكتابة")
+        }
+
         val id = idFor(url)
         val processId = "dl-$id"
-        val template = File(outDir, "${id}_%(title)s.%(ext)s").absolutePath
+        val workDir = File(outDir, id)
+        if (!workDir.exists() && !workDir.mkdirs()) {
+            throw YtDlpException("تعذر إنشاء مجلد مؤقت للفيديو")
+        }
+        if (!workDir.isDirectory || !workDir.canWrite()) {
+            throw YtDlpException("مجلد الفيديو المؤقت غير صالح")
+        }
+
+        val template = File(workDir, "${id}_%(title).100s.%(ext)s").absolutePath
 
         val request = YoutubeDLRequest(url).apply {
             addOption("-f", quality.format)
             addOption("--merge-output-format", "mp4")
             addOption("-o", template)
-            addOption("--trim-filenames", "120")
+            addOption("--trim-filenames", "100")
+            addOption("--windows-filenames")
             addOption("--no-playlist")
             addOption("--no-mtime")
             addOption("--continue")
@@ -97,7 +112,7 @@ object YtDlpDownloader {
         }
 
         if (control.isCancelled) throw DownloadCancelledException()
-        return findOutput(outDir, id)
+        return findOutput(workDir, id)
     }
 
     /** Turns raw yt-dlp output into a message the user can act on, and decides whether to fall back. */

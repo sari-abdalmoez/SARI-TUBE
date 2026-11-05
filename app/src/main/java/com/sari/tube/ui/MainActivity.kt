@@ -13,9 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -24,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -200,20 +200,20 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onOpenDownloads) {
-                    Icon(
-                        Icons.Filled.Menu,
-                        contentDescription = "الملفات المنزّلة",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(30.dp)
+                IconButton(onClick = onOpenSettings) {
+                    SariToolsIcon(
+                        modifier = Modifier.size(30.dp).semantics {
+                            contentDescription = "الأدوات"
+                        },
+                        tint = Color.White
                     )
                 }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(
-                        Icons.Filled.Settings,
-                        contentDescription = "الإعدادات",
-                        tint = Color(0xFF9A9AA5),
-                        modifier = Modifier.size(28.dp)
+                IconButton(onClick = onOpenDownloads) {
+                    SariPlayIcon(
+                        modifier = Modifier.size(30.dp).semantics {
+                            contentDescription = "تشغيل"
+                        },
+                        tint = Color.White
                     )
                 }
             }

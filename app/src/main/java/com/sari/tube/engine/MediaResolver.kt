@@ -32,11 +32,22 @@ object MediaResolver {
         }
 
         val parsed = URL(pageUrl)
-        val origin = "${parsed.protocol}://${parsed.host}/"
         val last = parsed.path.substringAfterLast('/').substringBefore('?')
         val ext = last.substringAfterLast('.', "").lowercase()
-        val name = if (ext in MEDIA_EXT) sanitize(last) else sanitize(last.ifBlank { "video" }) + ".mp4"
-        result += Candidate(pageUrl, mapOf("Referer" to origin), "مباشر", name, mimeFor(name))
+
+        // لا تمرر صفحة HTML إلى محرك التنزيل المباشر.
+        // المحرك المباشر يقبل روابط ملفات الوسائط ذات الامتداد المعروف فقط.
+        if (ext in MEDIA_EXT) {
+            val origin = "${parsed.protocol}://${parsed.host}/"
+            val name = sanitize(last)
+            result += Candidate(
+                pageUrl,
+                mapOf("Referer" to origin),
+                "مباشر",
+                name,
+                mimeFor(name)
+            )
+        }
         return result
     }
 
