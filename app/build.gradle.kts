@@ -12,6 +12,10 @@ android {
     compileSdk = 35
 
     defaultConfig {
+        ndk {
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
+        }
+
         applicationId = "com.sari.tube"
         minSdk = 29
         targetSdk = 35
