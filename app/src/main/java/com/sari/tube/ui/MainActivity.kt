@@ -26,9 +26,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,7 +34,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,7 +50,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -102,8 +98,6 @@ class MainActivity : ComponentActivity() {
                             tab == TAB_TOOLS -> SettingsScreen(onBack = { tab = TAB_DOWNLOAD })
                             tab == TAB_PLAY -> DownloadsScreen(onBack = { tab = TAB_DOWNLOAD })
                             else -> HomeScreen(
-                                onOpenDownloads = { tab = TAB_PLAY },
-                                onOpenSettings = { tab = TAB_TOOLS },
                                 onSearch = { q ->
                                     pendingQuery = q
                                     searching = true
@@ -196,8 +190,6 @@ private fun NavItem(label: String, icon: ImageVector, active: Boolean, onClick: 
 
 @Composable
 fun HomeScreen(
-    onOpenDownloads: () -> Unit,
-    onOpenSettings: () -> Unit,
     onSearch: (String) -> Unit,
     onDownload: (String) -> Unit
 ) {
@@ -218,7 +210,7 @@ fun HomeScreen(
             ) {
                 Text(
                     "SARI TUBE",
-                    fontSize = 42.sp,
+                    fontSize = 36.sp,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.primary,
                     letterSpacing = 2.sp
@@ -287,33 +279,6 @@ fun HomeScreen(
             )
         }
 
-        // Top bar drawn last so it receives taps. LTR positions: downloads on the left, settings on the right.
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onOpenDownloads) {
-                    Icon(
-                        Icons.Filled.Menu,
-                        contentDescription = "الملفات المنزّلة",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(30.dp)
-                    )
-                }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(
-                        Icons.Filled.Settings,
-                        contentDescription = "الإعدادات",
-                        tint = Color(0xFF9A9AA5),
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
-        }
+
     }
 }
