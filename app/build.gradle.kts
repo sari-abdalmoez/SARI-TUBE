@@ -5,7 +5,7 @@ plugins {
 }
 
 // تحقق من آخر إصدار في: https://github.com/yausername/youtubedl-android/releases
-val youtubedlVersion = "0.18.1"
+val youtubedlVersion = "0.17.5"
 
 android {
     namespace = "com.sari.tube"
@@ -15,8 +15,8 @@ android {
         applicationId = "com.sari.tube"
         minSdk = 29
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.5.0"
+        versionCode = 9
+        versionName = "0.6.0"
     }
 
     buildFeatures { compose = true }
@@ -48,7 +48,6 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.runtime:runtime-saveable")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
@@ -57,6 +56,6 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
 
     // yt-dlp مع بيئة Python، و FFmpeg لدمج الفيديو والصوت.
-    implementation("io.github.junkfood02.youtubedl-android:library:$youtubedlVersion")
-    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlVersion")
+    implementation("com.github.yausername.youtubedl-android:library:$youtubedlVersion")
+    implementation("com.github.yausername.youtubedl-android:ffmpeg:$youtubedlVersion")
 }

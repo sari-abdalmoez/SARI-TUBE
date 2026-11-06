@@ -10,22 +10,46 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
@@ -40,10 +64,9 @@ import com.sari.tube.service.DownloadService
 import com.sari.tube.ui.search.SearchScreen
 import com.sari.tube.ui.search.SearchViewModel
 
-private const val SCREEN_HOME = 0
-private const val SCREEN_DOWNLOADS = 1
-private const val SCREEN_SETTINGS = 2
-private const val SCREEN_SEARCH = 3
+private const val TAB_TOOLS = 0
+private const val TAB_PLAY = 1
+private const val TAB_DOWNLOAD = 2
 
 class MainActivity : ComponentActivity() {
     private val askNotifications =
@@ -54,45 +77,56 @@ class MainActivity : ComponentActivity() {
         AppPrefs.applyRate(this)
         setContent {
             SariTheme {
-                var screen by rememberSaveable { mutableStateOf(SCREEN_HOME) }
+                var tab by rememberSaveable { mutableStateOf(TAB_DOWNLOAD) }
+                var searching by rememberSaveable { mutableStateOf(false) }
                 var pendingQuery by rememberSaveable { mutableStateOf("") }
                 var sheetUrl by rememberSaveable { mutableStateOf<String?>(null) }
-                sheetUrl?.let { u ->
-                    FormatSheet(
-                        url = u,
-                        onDismiss = { sheetUrl = null },
-                        onConfirm = { o ->
-                            startDownload(u, o.selector, o.isAudio)
-                            sheetUrl = null
-                        }
-                    )
-                }
-                when (screen) {
-                    SCREEN_DOWNLOADS -> DownloadsScreen(onBack = { screen = SCREEN_HOME })
-                    SCREEN_SETTINGS -> SettingsScreen(onBack = { screen = SCREEN_HOME })
-                    SCREEN_SEARCH -> {
-                        val vm = viewModel<SearchViewModel>()
-                        LaunchedEffect(pendingQuery) {
-                            if (pendingQuery.isNotBlank()) {
-                                vm.startSearch(pendingQuery)
-                                pendingQuery = ""
+
+                Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        when {
+                            searching -> {
+                                val vm = viewModel<SearchViewModel>()
+                                LaunchedEffect(pendingQuery) {
+                                    if (pendingQuery.isNotBlank()) {
+                                        vm.startSearch(pendingQuery)
+                                        pendingQuery = ""
+                                    }
+                                }
+                                SearchScreen(
+                                    vm = vm,
+                                    onBack = { searching = false },
+                                    onDownload = { url, sel, aud -> startDownload(url, sel, aud) }
+                                )
                             }
+                            tab == TAB_TOOLS -> SettingsScreen(onBack = { tab = TAB_DOWNLOAD })
+                            tab == TAB_PLAY -> DownloadsScreen(onBack = { tab = TAB_DOWNLOAD })
+                            else -> HomeScreen(
+                                onOpenDownloads = { tab = TAB_PLAY },
+                                onOpenSettings = { tab = TAB_TOOLS },
+                                onSearch = { q ->
+                                    pendingQuery = q
+                                    searching = true
+                                },
+                                onDownload = { url -> sheetUrl = url }
+                            )
                         }
-                        SearchScreen(
-                            vm = vm,
-                            onBack = { screen = SCREEN_HOME },
-                            onDownload = { url, sel, aud -> startDownload(url, sel, aud) }
-                        )
+
+                        sheetUrl?.let { u ->
+                            FormatSheet(
+                                url = u,
+                                onDismiss = { sheetUrl = null },
+                                onConfirm = { o ->
+                                    startDownload(u, o.selector, o.isAudio)
+                                    sheetUrl = null
+                                }
+                            )
+                        }
                     }
-                    else -> HomeScreen(
-                        onOpenDownloads = { screen = SCREEN_DOWNLOADS },
-                        onOpenSettings = { screen = SCREEN_SETTINGS },
-                        onSearch = { q ->
-                            pendingQuery = q
-                            screen = SCREEN_SEARCH
-                        },
-                        onDownload = { url -> sheetUrl = url }
-                    )
+
+                    if (!searching) {
+                        BottomNav(selected = tab, onSelect = { tab = it })
+                    }
                 }
             }
         }
@@ -105,7 +139,7 @@ class MainActivity : ComponentActivity() {
             askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         DownloadService.start(this, url, selector, audio)
-        Toast.makeText(this, "بدأ التحميل — تابع الإشعارات", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "بدأ التحميل، تابع الإشعارات", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -127,6 +161,40 @@ fun SariTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
+private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .navigationBarsPadding()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly
+    ) {
+        NavItem("الأدوات", ToolsGrid, selected == TAB_TOOLS) { onSelect(TAB_TOOLS) }
+        NavItem("تشغيل", PlayLibrary, selected == TAB_PLAY) { onSelect(TAB_PLAY) }
+        NavItem("تنزيل", DownloadArrow, selected == TAB_DOWNLOAD) { onSelect(TAB_DOWNLOAD) }
+    }
+}
+
+@Composable
+private fun NavItem(label: String, icon: ImageVector, active: Boolean, onClick: () -> Unit) {
+    val tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    Column(
+        Modifier.clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.height(2.dp))
+        Text(
+            label,
+            color = tint,
+            fontSize = 12.sp,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
+        )
+    }
+}
+
+@Composable
 fun HomeScreen(
     onOpenDownloads: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -136,17 +204,16 @@ fun HomeScreen(
     var text by rememberSaveable { mutableStateOf("") }
     val clipboard = LocalClipboardManager.current
     val trimmed = text.trim()
-    // A link starts a download. Anything else is a search phrase.
     val isLink = UrlParser.firstHttpUrl(trimmed) != null || DoodResolver.extractId(trimmed) != null
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Box(Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth().offset(y = (-72).dp),
+                modifier = Modifier.fillMaxWidth().offset(y = (-48).dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
@@ -158,21 +225,23 @@ fun HomeScreen(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "حمّل فيديوهاتك بسهولة",
+                    "ابحث عن فيديو أو أغنية، أو ألصق رابطاً للتنزيل",
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(Modifier.height(40.dp))
+                Spacer(Modifier.height(36.dp))
 
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("ابحث عن فيديو أو ألصق رابطاً") },
+                    placeholder = { Text("ابحث أو ألصق رابط الفيديو") },
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
                     trailingIcon = {
-                        TextButton(onClick = { clipboard.getText()?.text?.let { text = it } }) {
+                        androidx.compose.material3.TextButton(onClick = {
+                            clipboard.getText()?.text?.let { text = it }
+                        }) {
                             Text("لصق", color = MaterialTheme.colorScheme.primary)
                         }
                     }
@@ -180,7 +249,7 @@ fun HomeScreen(
             }
             Spacer(Modifier.height(16.dp))
 
-            // Gradient yellow-to-orange action button. Its label and icon change with the input.
+            // Gradient yellow-to-orange action button. Its label and icon follow the input.
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -218,7 +287,7 @@ fun HomeScreen(
             )
         }
 
-        // شريط الأعلى يُرسم آخراً ليستقبل النقرات. المواضع ثابتة LTR: القائمة يساراً والإعدادات يميناً.
+        // Top bar drawn last so it receives taps. LTR positions: downloads on the left, settings on the right.
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Row(
                 modifier = Modifier

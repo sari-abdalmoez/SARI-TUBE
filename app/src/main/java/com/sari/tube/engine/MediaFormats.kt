@@ -72,7 +72,7 @@ object MediaFormats {
 
         val result = ArrayList<MediaOption>()
         if (bestAudio != null) {
-            result.add(MediaOption("mp3", "MP3 128K", true, bestAudio.size, "ba/b"))
+            result.add(MediaOption("m4a", "M4A (صوت)", true, bestAudio.size, "ba[ext=m4a]/ba"))
         }
 
         for (tier in VIDEO_TIERS) {
@@ -85,7 +85,7 @@ object MediaFormats {
                 audioNeeded -> best.size + (bestAudio?.size ?: 0L)
                 else -> best.size
             }
-            result.add(MediaOption("v$tier", "${tier}p", false, total, "bv*[height<=$tier]+ba/b[height<=$tier]"))
+            result.add(MediaOption("v$tier", "${tier}p", false, total, "b[height<=$tier][ext=mp4]/bv*[height<=$tier]+ba[ext=m4a]/bv*[height<=$tier]+ba/b[height<=$tier]"))
         }
 
         return if (result.isEmpty()) fallback() else result

@@ -1,6 +1,7 @@
 package com.sari.tube.engine
 
 import android.util.Log
+import com.yausername.youtubedl_android.DownloadProgressCallback
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -8,23 +9,22 @@ import java.io.File
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Failure of the yt-dlp engine. The caller may try the fallback engine. */
+/** A yt-dlp failure. The caller may try the fallback engine. */
 open class YtDlpException(message: String) : IOException(message)
 
-/** The site is not known to yt-dlp. Fallback is useful here. */
+/** The site is not supported by yt-dlp. Fallback is useful here. */
 class YtUnsupportedException(message: String) : YtDlpException(message)
 
-/** Access is blocked (private, removed, login required, region). Other engines will not help. */
+/** Access is blocked (private, removed, login, region). No other engine can get around this. */
 class YtBlockedException(message: String) : YtDlpException(message)
 
-enum class YtQuality(val format: String) {
-    BEST("bv*+ba/b"),
-    P1080("bv*[height<=1080]+ba/b[height<=1080]"),
-    P720("bv*[height<=720]+ba/b[height<=720]"),
-    P480("bv*[height<=480]+ba/b[height<=480]"),
-    AUDIO("ba/b")
-}
-
+/**
+ * Downloads one item with yt-dlp.
+ *
+ * The selector comes from MediaFormats and prefers a single ready-made file. A merge
+ * (video + audio joined by FFmpeg) happens only when no single file exists for that height.
+ * Merging is the step that failed with "Unable to rename file" in earlier builds, so it is avoided when possible.
+ */
 object YtDlpDownloader {
     private const val TAG = "SariTube"
     private val FRAGMENT_REGEX = Regex("""\.f\d+\.""")
@@ -43,10 +43,9 @@ object YtDlpDownloader {
     }
 
     /**
-     * Downloads one item to outDir. Blocking: call from Dispatchers.IO.
-     * The file name starts with the stable id, so partial downloads resume on the next attempt.
-     * If yt-dlp fails only at the final rename step (titles with symbols such as "|" caused this),
-     * it retries once with ASCII-only file names.
+     * Blocking call: run it on Dispatchers.IO. The file name starts with a stable id per URL,
+     * so an interrupted download can resume. If yt-dlp fails only at the rename step, one retry
+     * uses ASCII-only names, because titles with symbols caused that failure.
      */
     fun download(
         url: String,
@@ -63,7 +62,7 @@ object YtDlpDownloader {
         } catch (e: YtDlpException) {
             if (control.isCancelled || e is YtBlockedException || e is YtUnsupportedException) throw e
             if (!e.message.orEmpty().contains("rename", true)) throw e
-            Log.w(TAG, "rename failed, retrying with ASCII file names: ${e.message}")
+            Log.w(TAG, "rename failed, retrying with ASCII names: ${e.message}")
             runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = true)
         }
     }
@@ -84,13 +83,7 @@ object YtDlpDownloader {
 
         val request = YoutubeDLRequest(url).apply {
             addOption("-f", selector)
-            if (audioOnly) {
-                addOption("-x")
-                addOption("--audio-format", "mp3")
-                addOption("--audio-quality", "128K")
-            } else {
-                addOption("--merge-output-format", "mp4")
-            }
+            if (!audioOnly) addOption("--merge-output-format", "mp4")
             addOption("-o", template)
             if (asciiNames) addOption("--restrict-filenames")
             addOption("--no-playlist")
@@ -99,7 +92,7 @@ object YtDlpDownloader {
             addOption("--newline")
         }
 
-        // yt-dlp does not react to cancellation on its own, so a watcher stops the process.
+        // yt-dlp does not stop on its own when the user cancels, so a watcher kills the process.
         val finished = AtomicBoolean(false)
         Thread {
             while (!finished.get()) {
@@ -113,19 +106,17 @@ object YtDlpDownloader {
 
         try {
             YtDlpLock.shared {
-                YoutubeDL.getInstance().execute(
-                    request,
-                    processId,
-                    callback = { progress, etaInSeconds, _ ->
+                YoutubeDL.getInstance().execute(request, processId, object : DownloadProgressCallback {
+                    override fun onProgressUpdate(progress: Float, etaInSeconds: Long) {
                         onProgress(progress, etaInSeconds)
                     }
-                )
+                })
             }
         } catch (e: YoutubeDLException) {
             if (control.isCancelled) throw DownloadCancelledException()
-            val classified = classify(e.message.orEmpty())
-            Log.w(TAG, "yt-dlp download failed for $url: ${e.message}")
-            throw classified
+            val raw = e.message.orEmpty()
+            Log.w(TAG, "yt-dlp download failed for $url: $raw")
+            throw classify(raw)
         } finally {
             finished.set(true)
         }
@@ -159,7 +150,7 @@ object YtDlpDownloader {
         }
     }
 
-    /** Picks the final file and ignores fragments such as .f137.mp4 and .part files. */
+    /** Picks the final file and skips fragments such as .f137.mp4 and partial files. */
     private fun findOutput(dir: File, id: String): File {
         val file = dir.listFiles { f ->
             f.name.startsWith(id) &&
