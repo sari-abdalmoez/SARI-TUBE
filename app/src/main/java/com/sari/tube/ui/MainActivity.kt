@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -56,6 +55,17 @@ class MainActivity : ComponentActivity() {
             SariTheme {
                 var screen by rememberSaveable { mutableStateOf(SCREEN_HOME) }
                 var pendingQuery by rememberSaveable { mutableStateOf("") }
+                var sheetUrl by rememberSaveable { mutableStateOf<String?>(null) }
+                sheetUrl?.let { u ->
+                    FormatSheet(
+                        url = u,
+                        onDismiss = { sheetUrl = null },
+                        onConfirm = { o ->
+                            startDownload(u, o.selector, o.isAudio)
+                            sheetUrl = null
+                        }
+                    )
+                }
                 when (screen) {
                     SCREEN_DOWNLOADS -> DownloadsScreen(onBack = { screen = SCREEN_HOME })
                     SCREEN_SETTINGS -> SettingsScreen(onBack = { screen = SCREEN_HOME })
@@ -70,7 +80,7 @@ class MainActivity : ComponentActivity() {
                         SearchScreen(
                             vm = vm,
                             onBack = { screen = SCREEN_HOME },
-                            onDownload = { item -> startDownload(item.url) }
+                            onDownload = { url, sel, aud -> startDownload(url, sel, aud) }
                         )
                     }
                     else -> HomeScreen(
@@ -80,20 +90,20 @@ class MainActivity : ComponentActivity() {
                             pendingQuery = q
                             screen = SCREEN_SEARCH
                         },
-                        onDownload = { url -> startDownload(url) }
+                        onDownload = { url -> sheetUrl = url }
                     )
                 }
             }
         }
     }
 
-    private fun startDownload(url: String) {
+    private fun startDownload(url: String, selector: String = "bv*+ba/b", audio: Boolean = false) {
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        DownloadService.start(this, url)
+        DownloadService.start(this, url, selector, audio)
         Toast.makeText(this, "بدأ التحميل — تابع الإشعارات", Toast.LENGTH_SHORT).show()
     }
 }
@@ -185,7 +195,7 @@ fun HomeScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        if (isLink) Icons.Filled.KeyboardArrowDown else Icons.Filled.Search,
+                        if (isLink) DownloadArrow else Icons.Filled.Search,
                         contentDescription = null,
                         tint = Color(0xFF141414)
                     )

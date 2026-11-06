@@ -1,6 +1,7 @@
 package com.sari.tube.engine
 
 import android.util.Log
+import com.yausername.youtubedl_android.DownloadProgressCallback
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -52,18 +53,19 @@ object YtDlpDownloader {
         url: String,
         outDir: File,
         control: DownloadControl,
-        quality: YtQuality,
+        selector: String,
+        audioOnly: Boolean,
         onProgress: (percent: Float, etaSec: Long) -> Unit
     ): File {
         outDir.mkdirs()
         val id = idFor(url)
         return try {
-            runOnce(url, outDir, id, control, quality, onProgress, asciiNames = false)
+            runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = false)
         } catch (e: YtDlpException) {
             if (control.isCancelled || e is YtBlockedException || e is YtUnsupportedException) throw e
             if (!e.message.orEmpty().contains("rename", true)) throw e
             Log.w(TAG, "rename failed, retrying with ASCII file names: ${e.message}")
-            runOnce(url, outDir, id, control, quality, onProgress, asciiNames = true)
+            runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = true)
         }
     }
 
@@ -72,7 +74,8 @@ object YtDlpDownloader {
         outDir: File,
         id: String,
         control: DownloadControl,
-        quality: YtQuality,
+        selector: String,
+        audioOnly: Boolean,
         onProgress: (percent: Float, etaSec: Long) -> Unit,
         asciiNames: Boolean
     ): File {
@@ -81,8 +84,14 @@ object YtDlpDownloader {
         else File(outDir, "${id}_%(title).50s.%(ext)s").absolutePath
 
         val request = YoutubeDLRequest(url).apply {
-            addOption("-f", quality.format)
-            addOption("--merge-output-format", "mp4")
+            addOption("-f", selector)
+            if (audioOnly) {
+                addOption("-x")
+                addOption("--audio-format", "mp3")
+                addOption("--audio-quality", "128K")
+            } else {
+                addOption("--merge-output-format", "mp4")
+            }
             addOption("-o", template)
             if (asciiNames) addOption("--restrict-filenames")
             addOption("--no-playlist")
@@ -105,14 +114,11 @@ object YtDlpDownloader {
 
         try {
             YtDlpLock.shared {
-                YoutubeDL.getInstance().execute(
-                    request = request,
-                    processId = processId,
-                    redirectErrorStream = false,
-                    callback = { progress, etaInSeconds, _ ->
+                YoutubeDL.getInstance().execute(request, processId, object : DownloadProgressCallback {
+                    override fun onProgressUpdate(progress: Float, etaInSeconds: Long) {
                         onProgress(progress, etaInSeconds)
                     }
-                )
+                })
             }
         } catch (e: YoutubeDLException) {
             if (control.isCancelled) throw DownloadCancelledException()

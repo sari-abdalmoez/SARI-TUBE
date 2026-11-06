@@ -45,16 +45,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.sari.tube.engine.VideoItem
+import com.sari.tube.ui.DownloadArrow
+import com.sari.tube.ui.FormatSheet
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import java.util.Locale
 
 @Composable
 fun SearchScreen(
     vm: SearchViewModel,
     onBack: () -> Unit,
-    onDownload: (VideoItem) -> Unit
+    onDownload: (url: String, selector: String, audioOnly: Boolean) -> Unit
 ) {
     val tabs = SearchTab.entries
     val selectedIndex = tabs.indexOf(vm.tab)
+    var pick by remember { mutableStateOf<VideoItem?>(null) }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(
@@ -132,13 +139,23 @@ fun SearchScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             items(visible, key = { it.id }) { item ->
-                                VideoCard(item = item, onDownload = { onDownload(item) })
+                                VideoCard(item = item, onDownload = { pick = item })
                             }
                         }
                     }
                 }
             }
         }
+    }
+    pick?.let { p ->
+        FormatSheet(
+            url = p.url,
+            onDismiss = { pick = null },
+            onConfirm = { o ->
+                onDownload(p.url, o.selector, o.isAudio)
+                pick = null
+            }
+        )
     }
 }
 
@@ -206,7 +223,7 @@ private fun VideoCard(item: VideoItem, onDownload: () -> Unit) {
         }
 
         IconButton(onClick = onDownload) {
-            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "تنزيل", tint = MaterialTheme.colorScheme.primary)
+            Icon(DownloadArrow, contentDescription = "تنزيل", tint = MaterialTheme.colorScheme.primary)
         }
     }
 }

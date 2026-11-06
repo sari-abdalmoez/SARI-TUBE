@@ -19,7 +19,6 @@ import com.sari.tube.engine.YtBlockedException
 import com.sari.tube.engine.YtDlpDownloader
 import com.sari.tube.engine.YtDlpEngine
 import com.sari.tube.engine.YtDlpException
-import com.sari.tube.engine.YtQuality
 import com.sari.tube.storage.HistoryStore
 import com.sari.tube.storage.PublicSaver
 import kotlinx.coroutines.CoroutineScope
@@ -33,19 +32,25 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Runs downloads in the background, with notifications for progress, completion and failure. */
+/**
+ * Background downloads with notifications. A link is downloaded through yt-dlp using the format the
+ * user chose (audio or a video height). The direct engine is used only when yt-dlp cannot handle the site.
+ */
 class DownloadService : Service() {
     companion object {
         const val EXTRA_INPUT = "input"
         const val EXTRA_ID = "id"
-        const val EXTRA_QUALITY = "quality"
+        const val EXTRA_SELECTOR = "selector"
+        const val EXTRA_AUDIO = "audio"
         const val ACTION_CANCEL = "com.sari.tube.CANCEL"
         private const val TAG = "SariTube"
+        private const val DEFAULT_SELECTOR = "bv*+ba/b"
 
-        fun start(context: Context, input: String, quality: YtQuality = YtQuality.BEST) {
+        fun start(context: Context, input: String, selector: String = DEFAULT_SELECTOR, audioOnly: Boolean = false) {
             val intent = Intent(context, DownloadService::class.java)
                 .putExtra(EXTRA_INPUT, input)
-                .putExtra(EXTRA_QUALITY, quality.name)
+                .putExtra(EXTRA_SELECTOR, selector)
+                .putExtra(EXTRA_AUDIO, audioOnly)
             ContextCompat.startForegroundService(context, intent)
         }
     }
@@ -72,8 +77,8 @@ class DownloadService : Service() {
         }
         val input = intent?.getStringExtra(EXTRA_INPUT)?.takeIf { it.isNotBlank() }
             ?: return START_NOT_STICKY
-        val quality = runCatching { YtQuality.valueOf(intent.getStringExtra(EXTRA_QUALITY).orEmpty()) }
-            .getOrDefault(YtQuality.BEST)
+        val selector = intent.getStringExtra(EXTRA_SELECTOR)?.takeIf { it.isNotBlank() } ?: DEFAULT_SELECTOR
+        val audioOnly = intent.getBooleanExtra(EXTRA_AUDIO, false)
 
         val id = nextId++
         val control = DownloadControl()
@@ -83,18 +88,20 @@ class DownloadService : Service() {
             notifier.foreground(controls.size),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         )
-        scope.launch { execute(id, input, control, quality) }
+        scope.launch { execute(id, input, control, selector, audioOnly) }
         return START_NOT_STICKY
     }
 
-    private suspend fun execute(id: Int, input: String, control: DownloadControl, quality: YtQuality) {
+    private suspend fun execute(
+        id: Int, input: String, control: DownloadControl, selector: String, audioOnly: Boolean
+    ) {
         var holdsSlot = false
         try {
             waitForSlot(id, control)
             holdsSlot = true
 
             val url = UrlParser.firstHttpUrl(input)
-            if (url != null) downloadSmart(id, input, url, control, quality)
+            if (url != null) downloadSmart(id, input, url, control, selector, audioOnly)
             else downloadDirect(id, input, control)
         } catch (e: DownloadCancelledException) {
             notifier.cancelled(id)
@@ -112,15 +119,14 @@ class DownloadService : Service() {
     }
 
     /**
-     * yt-dlp is tried first for every link. A blocked item stops here, because another engine
-     * cannot bypass a private, removed, or login-only item. An unsupported site or an extraction
-     * failure falls back to the direct engine.
+     * yt-dlp first. A blocked item stops here (no other engine bypasses private or login-only items).
+     * An unsupported site or an extraction failure falls back to the direct engine.
      */
     private suspend fun downloadSmart(
-        id: Int, input: String, url: String, control: DownloadControl, quality: YtQuality
+        id: Int, input: String, url: String, control: DownloadControl, selector: String, audioOnly: Boolean
     ) {
         try {
-            downloadWithYtDlp(id, url, control, quality)
+            downloadWithYtDlp(id, url, control, selector, audioOnly)
         } catch (e: DownloadCancelledException) {
             throw e
         } catch (e: YtBlockedException) {
@@ -137,12 +143,16 @@ class DownloadService : Service() {
         }
     }
 
-    private suspend fun downloadWithYtDlp(id: Int, url: String, control: DownloadControl, quality: YtQuality) {
+    private suspend fun downloadWithYtDlp(
+        id: Int, url: String, control: DownloadControl, selector: String, audioOnly: Boolean
+    ) {
         notifier.progress(id, "جارٍ تجهيز التحميل…", 0, 0, 0, indeterminate = true)
         if (!YtDlpEngine.awaitReady()) throw YtDlpException("محرك yt-dlp لم يجهز بعد")
 
         var last = 0L
-        val file = YtDlpDownloader.download(url, File(cacheDir, "ytdl"), control, quality) { percent, eta ->
+        val file = YtDlpDownloader.download(
+            url, File(cacheDir, "ytdl"), control, selector, audioOnly
+        ) { percent, eta ->
             val now = System.currentTimeMillis()
             if (now - last >= 1000) {
                 last = now
@@ -174,7 +184,6 @@ class DownloadService : Service() {
     /** Copies the file to Downloads, records it in history, then removes the temporary copy. */
     private fun finishFile(id: Int, src: File, name: String, mime: String) {
         val uri = PublicSaver.save(this, src, name, mime)
-        // A history failure must not make a successful download look failed.
         runCatching { HistoryStore.add(this, src, name, mime, uri.toString()) }
             .onFailure { Log.w(TAG, "history record failed", it) }
         src.delete()
