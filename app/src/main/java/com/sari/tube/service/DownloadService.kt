@@ -160,7 +160,11 @@ class DownloadService : Service() {
                 notifier.percent(id, "تحميل الوسائط", percent.toInt(), "${percent.toInt()}%$remaining")
             }
         }
-        finishFile(id, file, file.name, YtDlpDownloader.mimeFor(file.name))
+        // The numeric prefix is only an internal resume identifier, not the media title.
+        val displayName = file.name.replaceFirst(
+            Regex("^${Regex.escape(YtDlpDownloader.idFor(url))}_"), ""
+        )
+        finishFile(id, file, displayName, YtDlpDownloader.mimeFor(file.name))
     }
 
     private suspend fun downloadDirect(id: Int, input: String, control: DownloadControl) {

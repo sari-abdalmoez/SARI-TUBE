@@ -2,6 +2,7 @@ package com.sari.tube.storage
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import org.json.JSONArray
 import org.json.JSONObject
@@ -50,29 +51,68 @@ object HistoryStore {
 
     private fun probe(context: Context, src: File, id: String): Pair<Long, String?> {
         val mmr = MediaMetadataRetriever()
-        return try {
+        var duration = 0L
+        var bitmap: Bitmap? = null
+
+        try {
             mmr.setDataSource(src.absolutePath)
-            val duration = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            val hasVideo = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes"
-            var thumb: String? = null
+            duration = mmr.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_DURATION
+            )?.toLongOrNull() ?: 0L
+
+            val hasVideo = mmr.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO
+            ) == "yes"
+
+            // Video: use a frame. Audio: use the downloaded cover or embedded artwork.
             if (hasVideo) {
-                // Skip the first second when possible: the very first frame is often black.
                 val at = if (duration > 2000L) 1_000_000L else 0L
-                val frame = mmr.getFrameAtTime(at, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                if (frame != null) {
-                    val dir = File(context.filesDir, "thumbs").apply { mkdirs() }
-                    val f = File(dir, "$id.jpg")
-                    val small = scaleDown(frame, 240)
-                    f.outputStream().use { small.compress(Bitmap.CompressFormat.JPEG, 80, it) }
-                    thumb = f.absolutePath
+                bitmap = mmr.getFrameAtTime(
+                    at, MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                )
+            }
+
+            if (bitmap == null) {
+                val baseName = src.nameWithoutExtension
+                val cover = src.parentFile?.listFiles()?.firstOrNull {
+                    it.nameWithoutExtension == baseName &&
+                    it.extension.lowercase() in setOf("jpg", "jpeg", "png", "webp")
+                }
+                if (cover != null) {
+                    bitmap = BitmapFactory.decodeFile(cover.absolutePath)
                 }
             }
-            duration to thumb
-        } catch (e: Exception) {
-            0L to null
+
+            if (bitmap == null) {
+                val picture = mmr.embeddedPicture
+                if (picture != null) {
+                    bitmap = BitmapFactory.decodeByteArray(picture, 0, picture.size)
+                }
+            }
+        } catch (_: Exception) {
+            // Keep the download record even if metadata or artwork cannot be read.
         } finally {
-            mmr.release()
+            runCatching { mmr.release() }
         }
+
+        val thumb = bitmap?.let { image ->
+            runCatching {
+                val dir = File(context.filesDir, "thumbs").apply { mkdirs() }
+                val f = File(dir, "$id.jpg")
+                val small = scaleDown(image, 240)
+                f.outputStream().use {
+                    small.compress(Bitmap.CompressFormat.JPEG, 85, it)
+                }
+                if (small !== image) small.recycle()
+                f.absolutePath
+            }.getOrNull()
+        }
+
+        if (bitmap != null && !bitmap!!.isRecycled) {
+            runCatching { bitmap!!.recycle() }
+        }
+
+        return duration to thumb
     }
 
     private fun scaleDown(bmp: Bitmap, maxWidth: Int): Bitmap {

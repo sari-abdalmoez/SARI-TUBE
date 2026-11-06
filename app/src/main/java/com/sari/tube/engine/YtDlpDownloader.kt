@@ -77,14 +77,16 @@ object YtDlpDownloader {
         asciiNames: Boolean
     ): File {
         val processId = "dl-$id-${if (asciiNames) "a" else "t"}"
-        val template = if (asciiNames) File(outDir, "$id.%(ext)s").absolutePath
-        else File(outDir, "${id}_%(title).50s.%(ext)s").absolutePath
+        // Keep the real media title in both normal and ASCII retry filenames.
+        val template = File(outDir, "${id}_%(title).50s.%(ext)s").absolutePath
 
         val request = YoutubeDLRequest(url).apply {
             addOption("-f", selector)
             if (!audioOnly) addOption("--merge-output-format", "mp4")
             addOption("-o", template)
             if (asciiNames) addOption("--restrict-filenames")
+            addOption("--write-thumbnail")
+            addOption("--convert-thumbnails", "jpg")
             addOption("--no-playlist")
             addOption("--no-mtime")
             addOption("--continue")
