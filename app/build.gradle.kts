@@ -5,7 +5,7 @@ plugins {
 }
 
 // تحقق من آخر إصدار في: https://github.com/yausername/youtubedl-android/releases
-val youtubedlVersion = "0.17.5"
+val youtubedlVersion = "0.18.1"
 
 android {
     namespace = "com.sari.tube"
@@ -56,6 +56,6 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
 
     // yt-dlp مع بيئة Python، و FFmpeg لدمج الفيديو والصوت.
-    implementation("com.github.yausername.youtubedl-android:library:$youtubedlVersion")
-    implementation("com.github.yausername.youtubedl-android:ffmpeg:$youtubedlVersion")
+    implementation("io.github.junkfood02.youtubedl-android:library:$youtubedlVersion")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlVersion")
 }
