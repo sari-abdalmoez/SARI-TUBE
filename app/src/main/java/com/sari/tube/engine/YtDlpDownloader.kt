@@ -1,7 +1,6 @@
 package com.sari.tube.engine
 
 import android.util.Log
-import com.yausername.youtubedl_android.DownloadProgressCallback
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -114,11 +113,13 @@ object YtDlpDownloader {
 
         try {
             YtDlpLock.shared {
-                YoutubeDL.getInstance().execute(request, processId, object : DownloadProgressCallback {
-                    override fun onProgressUpdate(progress: Float, etaInSeconds: Long) {
+                YoutubeDL.getInstance().execute(
+                    request,
+                    processId,
+                    callback = { progress, etaInSeconds, _ ->
                         onProgress(progress, etaInSeconds)
                     }
-                })
+                )
             }
         } catch (e: YoutubeDLException) {
             if (control.isCancelled) throw DownloadCancelledException()
