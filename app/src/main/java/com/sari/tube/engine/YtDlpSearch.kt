@@ -28,11 +28,11 @@ data class VideoItem(
 class SearchException(message: String) : Exception(message)
 
 object YtDlpSearch {
-    private const val TIMEOUT_MS = 45_000L
+    private const val TIMEOUT_MS = 25_000L
     private val counter = AtomicLong(0)
 
     /** يبحث عبر ytsearch20:<query> ويعيد حتى 20 نتيجة. */
-    suspend fun search(query: String, count: Int = 20): List<VideoItem> = withContext(Dispatchers.IO) {
+    suspend fun search(query: String, count: Int = 8): List<VideoItem> = withContext(Dispatchers.IO) {
         if (!YtDlpEngine.awaitReady()) throw SearchException("محرك البحث لم يجهز بعد، حاول بعد لحظات")
         try {
             runSearch(query, count)

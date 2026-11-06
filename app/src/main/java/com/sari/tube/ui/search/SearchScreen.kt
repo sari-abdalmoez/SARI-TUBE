@@ -1,5 +1,25 @@
 package com.sari.tube.ui.search
 
+import androidx.media3.ui.PlayerView
+
+import androidx.media3.exoplayer.ExoPlayer
+
+import androidx.media3.common.MediaItem
+
+import androidx.compose.ui.viewinterop.AndroidView
+
+import androidx.compose.ui.platform.LocalContext
+
+import androidx.compose.runtime.rememberSaveable
+
+import androidx.compose.runtime.DisposableEffect
+
+import androidx.activity.result.contract.ActivityResultContracts
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+
+import android.content.Intent
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -80,7 +100,7 @@ fun SearchScreen(
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 shape = RoundedCornerShape(24.dp),
-                placeholder = { Text("ابحث عن فيديو أو أغنية") },
+
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { vm.submit() })
@@ -102,8 +122,10 @@ fun SearchScreen(
             }
         }
 
-        when (val s = vm.state) {
-            SearchUiState.Idle -> CenterMessage("ابحث عن فيديو أو أغنية من يوتيوب")
+        if (vm.tab == SearchTab.LOCAL) {
+            LocalVideoPanel()
+        } else when (val s = vm.state) {
+            SearchUiState.Idle -> Spacer(Modifier.fillMaxSize())
 
             SearchUiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
@@ -247,4 +269,73 @@ private fun formatViews(v: Long): String = when {
     v >= 1_000_000 -> String.format(Locale.US, "%.1fM", v / 1_000_000.0)
     v >= 1_000 -> String.format(Locale.US, "%.0fK", v / 1_000.0)
     else -> v.toString()
+}
+
+
+@Composable
+private fun LocalVideoPanel() {
+    val context = LocalContext.current
+    var selectedUri by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val picker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            selectedUri = uri.toString()
+        }
+    }
+
+    val player = remember(selectedUri) {
+        selectedUri?.let { uri ->
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(uri))
+                prepare()
+                playWhenReady = true
+            }
+        }
+    }
+
+    DisposableEffect(player) {
+        onDispose { player?.release() }
+    }
+
+    Column(
+        Modifier.fillMaxSize().padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Button(onClick = { picker.launch(arrayOf("video/*")) }) {
+            Text("اختيار فيديو من الهاتف")
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        if (player != null) {
+            AndroidView(
+                factory = { viewContext ->
+                    PlayerView(viewContext).apply {
+                        useController = true
+                        this.player = player
+                    }
+                },
+                update = { it.player = player },
+                modifier = Modifier.fillMaxWidth().weight(1f)
+            )
+        } else {
+            Box(
+                Modifier.fillMaxWidth().weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    " ",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
 }

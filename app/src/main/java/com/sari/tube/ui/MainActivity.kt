@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity() {
             askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         DownloadService.start(this, url, selector, audio)
-        Toast.makeText(this, "بدأ التحميل، تابع الإشعارات", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "بدأ التحميل", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -215,19 +215,13 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.primary,
                     letterSpacing = 2.sp
                 )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "ابحث عن فيديو أو أغنية، أو ألصق رابطاً للتنزيل",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 Spacer(Modifier.height(36.dp))
 
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("ابحث أو ألصق رابط الفيديو") },
+
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
                     trailingIcon = {

@@ -58,7 +58,7 @@ object YtDlpEngine {
                 false
             }
             ready.complete(ok)
-            if (ok) YtDlpUpdater.updateIfDue(app)
+            // لا نحدّث yt-dlp عند كل تشغيل؛ التحديث يتم عند اكتشاف مشكلة في الاستخراج.
         }, "ytdlp-init").start()
     }
 

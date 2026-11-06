@@ -45,6 +45,7 @@ object MediaFormats {
             addOption("--no-playlist")
             addOption("--no-warnings")
             addOption("--skip-download")
+            addOption("--no-check-formats")
         }
         val out = try {
             YtDlpLock.shared { YoutubeDL.getInstance().execute(request, processId).out }

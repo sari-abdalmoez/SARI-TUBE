@@ -38,6 +38,7 @@ import com.sari.tube.engine.MediaFormats
 import com.sari.tube.engine.MediaOption
 import kotlinx.coroutines.CancellationException
 import java.util.Locale
+import kotlin.math.abs
 
 /** Lets the user choose audio or a video quality, with the size each one needs. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,6 +49,7 @@ fun FormatSheet(url: String, onDismiss: () -> Unit, onConfirm: (MediaOption) -> 
     var options by remember(url) { mutableStateOf<List<MediaOption>>(emptyList()) }
     var selected by remember(url) { mutableStateOf<MediaOption?>(null) }
     var attempt by remember(url) { mutableStateOf(0) }
+    var showAllAudio by remember(url) { mutableStateOf(false) }
 
     LaunchedEffect(url, attempt) {
         loading = true
@@ -90,8 +92,40 @@ fun FormatSheet(url: String, onDismiss: () -> Unit, onConfirm: (MediaOption) -> 
                     val audio = options.filter { it.isAudio }
                     val video = options.filterNot { it.isAudio }
                     if (audio.isNotEmpty()) {
-                        SectionLabel("الموسيقى")
-                        audio.forEach { o -> OptionRow(o, o == selected) { selected = o } }
+                        val commonAudio = remember(audio) {
+                            val rates = audio.mapNotNull { option ->
+                                Regex("""(\\d+)\\s*kbps""", RegexOption.IGNORE_CASE)
+                                    .find(option.label)
+                                    ?.groupValues
+                                    ?.getOrNull(1)
+                                    ?.toIntOrNull()
+                                    ?.let { it to option }
+                            }
+
+                            val chosen = mutableListOf<MediaOption>()
+                            listOf(128, 192).forEach { target ->
+                                rates.minByOrNull { abs(it.first - target) }
+                                    ?.second
+                                    ?.let { if (it !in chosen) chosen.add(it) }
+                            }
+
+                            (chosen + audio.filterNot { it in chosen }
+                                .sortedByDescending { it.sizeBytes ?: 0L }).take(2)
+                        }
+
+                        SectionLabel("الصوت")
+                        (if (showAllAudio) audio else commonAudio).forEach { option ->
+                            OptionRow(option, option == selected) { selected = option }
+                        }
+
+                        if (audio.size > 2) {
+                            TextButton(onClick = { showAllAudio = !showAllAudio }) {
+                                Text(
+                                    if (showAllAudio) "إخفاء الجودات الأخرى" else "عرض كل الجودات",
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
                     }
                     if (video.isNotEmpty()) {
                         SectionLabel("فيديو")
