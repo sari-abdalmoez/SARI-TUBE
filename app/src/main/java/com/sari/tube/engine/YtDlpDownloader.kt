@@ -1,6 +1,7 @@
 package com.sari.tube.engine
 
 import android.util.Log
+import com.yausername.youtubedl_android.DownloadProgressCallback
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -44,7 +45,9 @@ object YtDlpDownloader {
 
     /**
      * Downloads one item to outDir. Blocking: call from Dispatchers.IO.
-     * The file name is stable per URL, so yt-dlp can resume a partial download on the next attempt.
+     * The file name starts with the stable id, so partial downloads resume on the next attempt.
+     * If yt-dlp fails only at the final rename step (titles with symbols such as "|" caused this),
+     * it retries once with ASCII-only file names.
      */
     fun download(
         url: String,
@@ -53,31 +56,36 @@ object YtDlpDownloader {
         quality: YtQuality,
         onProgress: (percent: Float, etaSec: Long) -> Unit
     ): File {
-        if (!outDir.exists() && !outDir.mkdirs()) {
-            throw YtDlpException("تعذر إنشاء مجلد التنزيل")
-        }
-        if (!outDir.isDirectory || !outDir.canWrite()) {
-            throw YtDlpException("مجلد التنزيل غير قابل للكتابة")
-        }
-
+        outDir.mkdirs()
         val id = idFor(url)
-        val processId = "dl-$id"
-        val workDir = File(outDir, id)
-        if (!workDir.exists() && !workDir.mkdirs()) {
-            throw YtDlpException("تعذر إنشاء مجلد مؤقت للفيديو")
+        return try {
+            runOnce(url, outDir, id, control, quality, onProgress, asciiNames = false)
+        } catch (e: YtDlpException) {
+            if (control.isCancelled || e is YtBlockedException || e is YtUnsupportedException) throw e
+            if (!e.message.orEmpty().contains("rename", true)) throw e
+            Log.w(TAG, "rename failed, retrying with ASCII file names: ${e.message}")
+            runOnce(url, outDir, id, control, quality, onProgress, asciiNames = true)
         }
-        if (!workDir.isDirectory || !workDir.canWrite()) {
-            throw YtDlpException("مجلد الفيديو المؤقت غير صالح")
-        }
+    }
 
-        val template = File(workDir, "${id}_%(title).100s.%(ext)s").absolutePath
+    private fun runOnce(
+        url: String,
+        outDir: File,
+        id: String,
+        control: DownloadControl,
+        quality: YtQuality,
+        onProgress: (percent: Float, etaSec: Long) -> Unit,
+        asciiNames: Boolean
+    ): File {
+        val processId = "dl-$id-${if (asciiNames) "a" else "t"}"
+        val template = if (asciiNames) File(outDir, "$id.%(ext)s").absolutePath
+        else File(outDir, "${id}_%(title).50s.%(ext)s").absolutePath
 
         val request = YoutubeDLRequest(url).apply {
             addOption("-f", quality.format)
             addOption("--merge-output-format", "mp4")
             addOption("-o", template)
-            addOption("--trim-filenames", "100")
-            addOption("--windows-filenames")
+            if (asciiNames) addOption("--restrict-filenames")
             addOption("--no-playlist")
             addOption("--no-mtime")
             addOption("--continue")
@@ -98,9 +106,11 @@ object YtDlpDownloader {
 
         try {
             YtDlpLock.shared {
-                YoutubeDL.getInstance().execute(request, processId) { progress, etaInSeconds, _ ->
-                    onProgress(progress, etaInSeconds)
-                }
+                YoutubeDL.getInstance().execute(request, processId, object : DownloadProgressCallback {
+                    override fun onProgressUpdate(progress: Float, etaInSeconds: Long) {
+                        onProgress(progress, etaInSeconds)
+                    }
+                })
             }
         } catch (e: YoutubeDLException) {
             if (control.isCancelled) throw DownloadCancelledException()
@@ -112,7 +122,7 @@ object YtDlpDownloader {
         }
 
         if (control.isCancelled) throw DownloadCancelledException()
-        return findOutput(workDir, id)
+        return findOutput(outDir, id)
     }
 
     /** Turns raw yt-dlp output into a message the user can act on, and decides whether to fall back. */
@@ -143,7 +153,7 @@ object YtDlpDownloader {
     /** Picks the final file and ignores fragments such as .f137.mp4 and .part files. */
     private fun findOutput(dir: File, id: String): File {
         val file = dir.listFiles { f ->
-            f.name.startsWith("${id}_") &&
+            f.name.startsWith(id) &&
                 f.extension.lowercase() in OUTPUT_EXT &&
                 !FRAGMENT_REGEX.containsMatchIn(f.name)
         }?.maxByOrNull { it.length() }

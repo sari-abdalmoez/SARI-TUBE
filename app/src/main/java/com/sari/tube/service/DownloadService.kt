@@ -142,7 +142,7 @@ class DownloadService : Service() {
         if (!YtDlpEngine.awaitReady()) throw YtDlpException("محرك yt-dlp لم يجهز بعد")
 
         var last = 0L
-        val file = YtDlpDownloader.download(url, File(filesDir, "ytdl"), control, quality) { percent, eta ->
+        val file = YtDlpDownloader.download(url, File(cacheDir, "ytdl"), control, quality) { percent, eta ->
             val now = System.currentTimeMillis()
             if (now - last >= 1000) {
                 last = now
@@ -178,8 +178,6 @@ class DownloadService : Service() {
         runCatching { HistoryStore.add(this, src, name, mime, uri.toString()) }
             .onFailure { Log.w(TAG, "history record failed", it) }
         src.delete()
-        // يحذف مجلد هذا التنزيل فقط إذا أصبح فارغاً.
-        src.parentFile?.delete()
         notifier.done(id, name, PublicSaver.FOLDER, uri, mime)
     }
 
@@ -210,7 +208,7 @@ class DownloadService : Service() {
         for (round in 1..2) {
             val candidates = MediaResolver.candidates(input)
             if (candidates.isEmpty()) {
-                lastError = "لم يتم استخراج ملف وسائط مباشر؛ لن يتم تنزيل صفحة الموقع كفيديو"
+                lastError = "الرابط غير صالح"
                 break
             }
             for (c in candidates) {

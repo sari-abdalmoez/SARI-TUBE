@@ -9,21 +9,24 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -165,21 +168,34 @@ fun HomeScreen(
             }
             Spacer(Modifier.height(16.dp))
 
-            Button(
-                onClick = {
-                    if (isLink) onDownload(trimmed) else onSearch(trimmed)
-                    text = ""
-                },
-                enabled = trimmed.isNotEmpty(),
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(24.dp)
+            // Gradient yellow-to-orange action button. Its label and icon change with the input.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .alpha(if (trimmed.isNotEmpty()) 1f else 0.4f)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Brush.horizontalGradient(listOf(Color(0xFFFFC53D), Color(0xFFFF8A00))))
+                    .clickable(enabled = trimmed.isNotEmpty()) {
+                        if (isLink) onDownload(trimmed) else onSearch(trimmed)
+                        text = ""
+                    },
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    if (isLink) Icons.Filled.KeyboardArrowDown else Icons.Filled.Search,
-                    contentDescription = null
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(if (isLink) "تنزيل" else "بحث", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (isLink) Icons.Filled.KeyboardArrowDown else Icons.Filled.Search,
+                        contentDescription = null,
+                        tint = Color(0xFF141414)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (isLink) "تنزيل" else "بحث",
+                        color = Color(0xFF141414),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -200,20 +216,20 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onOpenSettings) {
-                    SariToolsIcon(
-                        modifier = Modifier.size(30.dp).semantics {
-                            contentDescription = "الأدوات"
-                        },
-                        tint = Color.White
+                IconButton(onClick = onOpenDownloads) {
+                    Icon(
+                        Icons.Filled.Menu,
+                        contentDescription = "الملفات المنزّلة",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(30.dp)
                     )
                 }
-                IconButton(onClick = onOpenDownloads) {
-                    SariPlayIcon(
-                        modifier = Modifier.size(30.dp).semantics {
-                            contentDescription = "تشغيل"
-                        },
-                        tint = Color.White
+                IconButton(onClick = onOpenSettings) {
+                    Icon(
+                        Icons.Filled.Settings,
+                        contentDescription = "الإعدادات",
+                        tint = Color(0xFF9A9AA5),
+                        modifier = Modifier.size(28.dp)
                     )
                 }
             }
