@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.roundToInt
 
 /** One choice the user can download: a video height or an audio file. */
 data class MediaOption(
@@ -26,6 +27,8 @@ object MediaFormats {
     private val VIDEO_TIERS = listOf(360, 480, 720, 1080)
 
     private data class Fmt(
+        val formatId: String,
+        val ext: String,
         val height: Int,
         val size: Long?,
         val hasVideo: Boolean,
@@ -64,15 +67,52 @@ object MediaFormats {
             val size = sequenceOf("filesize", "filesize_approx")
                 .mapNotNull { k -> if (f.isNull(k)) null else f.optLong(k, 0L).takeIf { it > 0 } }
                 .firstOrNull()
-            fmts.add(Fmt(f.optInt("height", 0), size, hasV, hasA, f.optDouble("abr", 0.0)))
+            fmts.add(
+                Fmt(
+                    formatId = f.s("format_id"),
+                    ext = f.s("ext").ifBlank { "audio" },
+                    height = f.optInt("height", 0),
+                    size = size,
+                    hasVideo = hasV,
+                    hasAudio = hasA,
+                    abr = f.optDouble("abr", 0.0)
+                )
+            )
         }
 
-        val bestAudio = fmts.filter { it.hasAudio && !it.hasVideo }
-            .maxWithOrNull(compareBy<Fmt>({ it.abr }, { it.size ?: 0L }))
+        // Keep one real downloadable format for each available audio bitrate.
+        // Prefer M4A when the source offers multiple containers at the same bitrate.
+        val audioChoices = fmts
+            .filter { it.hasAudio && !it.hasVideo && it.formatId.isNotBlank() }
+            .groupBy { if (it.abr > 0) it.abr.roundToInt() else 0 }
+            .values
+            .mapNotNull { group ->
+                group.maxWithOrNull(
+                    compareBy<Fmt>(
+                        { if (it.ext.equals("m4a", true)) 1 else 0 },
+                        { it.size ?: 0L }
+                    )
+                )
+            }
+            .sortedWith(compareBy<Fmt>({ it.abr }, { it.size ?: 0L }))
 
         val result = ArrayList<MediaOption>()
-        if (bestAudio != null) {
-            result.add(MediaOption("m4a", "M4A (صوت)", true, bestAudio.size, "ba[ext=m4a]/ba"))
+        audioChoices.forEachIndexed { index, audio ->
+            val bitrate = audio.abr.roundToInt()
+            val label = if (bitrate > 0) {
+                "$bitrate kbps · ${audio.ext.uppercase(Locale.ROOT)}"
+            } else {
+                "صوت · ${audio.ext.uppercase(Locale.ROOT)}"
+            }
+            result.add(
+                MediaOption(
+                    id = "audio_$index",
+                    label = label,
+                    isAudio = true,
+                    sizeBytes = audio.size,
+                    selector = audio.formatId
+                )
+            )
         }
 
         for (tier in VIDEO_TIERS) {
