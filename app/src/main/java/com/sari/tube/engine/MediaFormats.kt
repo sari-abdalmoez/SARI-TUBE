@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.roundToInt
 
@@ -95,6 +96,11 @@ object MediaFormats {
                 )
             }
             .sortedWith(compareBy<Fmt>({ it.abr }, { it.size ?: 0L }))
+
+        // Select the best real audio-only format for combined video size estimation.
+        val bestAudio = audioChoices.maxWithOrNull(
+            compareBy<Fmt>({ it.abr }, { it.size ?: 0L })
+        )
 
         val result = ArrayList<MediaOption>()
         audioChoices.forEachIndexed { index, audio ->
