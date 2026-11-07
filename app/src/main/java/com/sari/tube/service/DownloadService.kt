@@ -7,6 +7,7 @@ import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.sari.tube.engine.ActiveDownloads
 import com.sari.tube.engine.AppPrefs
 import com.sari.tube.engine.Candidate
 import com.sari.tube.engine.DownloadCancelledException
@@ -53,6 +54,13 @@ class DownloadService : Service() {
                 .putExtra(EXTRA_AUDIO, audioOnly)
             ContextCompat.startForegroundService(context, intent)
         }
+
+        fun cancel(context: Context, id: Int) {
+            val cancelIntent = Intent(context, DownloadService::class.java)
+                .setAction(ACTION_CANCEL)
+                .putExtra(EXTRA_ID, id)
+            context.startService(cancelIntent)
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -83,6 +91,7 @@ class DownloadService : Service() {
         val id = nextId++
         val control = DownloadControl()
         controls[id] = control
+        ActiveDownloads.enqueue(id, input)
         startForeground(
             DownloadNotifier.FG_ID,
             notifier.foreground(controls.size),
@@ -96,19 +105,26 @@ class DownloadService : Service() {
         id: Int, input: String, control: DownloadControl, selector: String, audioOnly: Boolean
     ) {
         var holdsSlot = false
+        var succeeded = false
         try {
             waitForSlot(id, control)
             holdsSlot = true
+            ActiveDownloads.running(id)
 
             val url = UrlParser.firstHttpUrl(input)
             if (url != null) downloadSmart(id, input, url, control, selector, audioOnly)
             else downloadDirect(id, input, control)
+
+            succeeded = true
         } catch (e: DownloadCancelledException) {
+            ActiveDownloads.remove(id)
             notifier.cancelled(id)
         } catch (e: Exception) {
             Log.e(TAG, "download failed (id=$id, input=$input)", e)
+            ActiveDownloads.failed(id, e.message ?: "خطأ غير معروف")
             notifier.failed(id, e.message ?: "خطأ غير معروف")
         } finally {
+            if (succeeded) ActiveDownloads.remove(id)
             if (holdsSlot) activeSlots.decrementAndGet()
             controls.remove(id)
             if (controls.isEmpty()) {
@@ -147,6 +163,12 @@ class DownloadService : Service() {
         id: Int, url: String, control: DownloadControl, selector: String, audioOnly: Boolean
     ) {
         notifier.progress(id, "جارٍ تجهيز التحميل…", 0, 0, 0, indeterminate = true)
+        ActiveDownloads.updateProgress(
+            id,
+            title = "جارٍ تجهيز التحميل…",
+            progress = -1,
+            message = "جارٍ تجهيز محرك التحميل"
+        )
         if (!YtDlpEngine.awaitReady()) throw YtDlpException("محرك yt-dlp لم يجهز بعد")
 
         var last = 0L
@@ -158,6 +180,13 @@ class DownloadService : Service() {
                 last = now
                 val remaining = if (eta > 0) "  •  متبقٍ ${eta} ث" else ""
                 notifier.percent(id, "تحميل الوسائط", percent.toInt(), "${percent.toInt()}%$remaining")
+                ActiveDownloads.updateProgress(
+                    id,
+                    title = "تحميل الوسائط",
+                    progress = percent.toInt(),
+                    etaSeconds = eta,
+                    message = remaining
+                )
             }
         }
         // The numeric prefix is only an internal resume identifier, not the media title.
@@ -173,12 +202,31 @@ class DownloadService : Service() {
         val temp = File(dir, "dl_${input.trim().hashCode().toUInt()}.bin")
 
         notifier.progress(id, "جارٍ تحليل الرابط…", 0, 0, 0, indeterminate = true)
+        ActiveDownloads.updateProgress(
+            id,
+            title = "جارٍ تحليل الرابط…",
+            progress = -1,
+            message = "جارٍ تحليل الرابط"
+        )
         var last = 0L
         val chosen = fetchFirstWorking(input, temp, control) { name, downloaded, total, speed ->
             val now = System.currentTimeMillis()
             if (now - last >= 1000) {
                 last = now
                 notifier.progress(id, name, downloaded, total, speed)
+                ActiveDownloads.updateProgress(
+                    id,
+                    title = name,
+                    progress = if (total > 0L) {
+                        ((downloaded * 100L) / total).toInt().coerceIn(0, 100)
+                    } else {
+                        -1
+                    },
+                    downloadedBytes = downloaded,
+                    totalBytes = total,
+                    speedBytesPerSec = speed,
+                    message = "جارٍ تنزيل الملف"
+                )
             }
         }
         finishFile(id, temp, chosen.fileName, chosen.mime)
