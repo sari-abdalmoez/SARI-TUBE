@@ -200,96 +200,30 @@ fun HomeScreen(
     onDownload: (String) -> Unit
 ) {
     var text by rememberSaveable { mutableStateOf("") }
-    val clipboard = LocalClipboardManager.current
     val trimmed = text.trim()
-    val isLink = UrlParser.firstHttpUrl(trimmed) != null || DoodResolver.extractId(trimmed) != null
+    val isLink = UrlParser.firstHttpUrl(trimmed) != null ||
+        DoodResolver.extractId(trimmed) != null
 
-    Box(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().offset(y = (-48).dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                val brandTransition = rememberInfiniteTransition(label = "sari-loop-brand")
-                val brandColor by brandTransition.animateColor(
-                    initialValue = Color(0xFFFFD54F),
-                    targetValue = Color(0xFFFF6D00),
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(durationMillis = 7000, easing = LinearEasing),
-                        repeatMode = RepeatMode.Reverse
-                    ),
-                    label = "sari-loop-color"
-                )
-
-                Text(
-                    "SARI LOOP",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = brandColor,
-                    letterSpacing = 1.8.sp
-                )
-                Spacer(Modifier.height(36.dp))
-
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    modifier = Modifier.fillMaxWidth(),
-
-                    singleLine = true,
-                    shape = RoundedCornerShape(24.dp),
-                    trailingIcon = {
-                        androidx.compose.material3.TextButton(onClick = {
-                            clipboard.getText()?.text?.let { text = it }
-                        }) {
-                            Text("لصق", color = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-
-            // Gradient yellow-to-orange action button. Its label and icon follow the input.
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .alpha(if (trimmed.isNotEmpty()) 1f else 0.4f)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(Brush.horizontalGradient(listOf(Color(0xFFFFC53D), Color(0xFFFF8A00))))
-                    .clickable(enabled = trimmed.isNotEmpty()) {
-                        if (isLink) onDownload(trimmed) else onSearch(trimmed)
-                        text = ""
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        if (isLink) DownloadArrow else Icons.Filled.Search,
-                        contentDescription = null,
-                        tint = Color(0xFF141414)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (isLink) "تنزيل" else "بحث",
-                        color = Color(0xFF141414),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
+    Box(
+        Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        HomeHeader(
+            value = text,
+            onValueChange = { text = it },
+            onSearch = {
+                if (trimmed.isNotEmpty()) {
+                    onSearch(trimmed)
+                    text = ""
                 }
-            }
-
-            Spacer(Modifier.height(24.dp))
-            Text(
-                "يظهر تقدم التحميل في الإشعارات.\nيُحفظ الفيديو في: Download/SARI LOOP",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-
+            },
+            onDownloadLink = {
+                if (trimmed.isNotEmpty() && isLink) {
+                    onDownload(trimmed)
+                    text = ""
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
