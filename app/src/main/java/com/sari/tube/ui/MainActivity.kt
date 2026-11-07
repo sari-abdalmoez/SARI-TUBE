@@ -10,7 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateColor
+import androidx.compose.animation.animateColor
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -284,7 +284,7 @@ fun HomeScreen(
 
             Spacer(Modifier.height(24.dp))
             Text(
-                "يظهر تقدم التحميل في الإشعارات.\nيُحفظ الفيديو في: Download/SARI TUBE",
+                "يظهر تقدم التحميل في الإشعارات.\nيُحفظ الفيديو في: Download/SARI LOOP",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
