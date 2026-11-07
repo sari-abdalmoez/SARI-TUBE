@@ -24,7 +24,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -126,14 +125,14 @@ fun SearchScreen(
         if (vm.tab == SearchTab.LOCAL) {
             LocalVideoPanel()
         } else when (val s = vm.state) {
-            SearchUiState.Idle -> Spacer(Modifier.weight(1f))
+            SearchUiState.Idle -> Spacer(Modifier.fillMaxSize())
 
-            SearchUiState.Loading -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            SearchUiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             }
 
             is SearchUiState.Failed -> Column(
-                Modifier.weight(1f).fillMaxWidth().padding(24.dp),
+                Modifier.fillMaxSize().padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
@@ -158,7 +157,6 @@ fun SearchScreen(
                         CenterMessage("لا توجد نتائج في هذا التبويب")
                     } else {
                         LazyColumn(
-                            Modifier.weight(1f),
                             contentPadding = PaddingValues(12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
@@ -253,8 +251,8 @@ private fun VideoCard(item: VideoItem, onDownload: () -> Unit) {
 }
 
 @Composable
-private fun ColumnScope.CenterMessage(text: String) {
-    Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+private fun CenterMessage(text: String) {
+    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
     }
 }

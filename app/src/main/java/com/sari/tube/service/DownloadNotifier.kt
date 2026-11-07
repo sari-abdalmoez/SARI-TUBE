@@ -34,7 +34,7 @@ class DownloadNotifier(private val context: Context) {
 
     fun foreground(activeCount: Int): Notification =
         base(CH_PROGRESS)
-            .setContentTitle("SARI Loop")
+            .setContentTitle("SARI TUBE")
             .setContentText("جارٍ تنفيذ $activeCount تحميل")
             .setOngoing(true)
             .build()

@@ -7,10 +7,7 @@ import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
 import androidx.core.content.ContextCompat
-import com.sari.tube.engine.ActiveDownload
-import com.sari.tube.engine.ActiveDownloads
 import com.sari.tube.engine.AppPrefs
-import com.sari.tube.engine.DlState
 import com.sari.tube.engine.Candidate
 import com.sari.tube.engine.DownloadCancelledException
 import com.sari.tube.engine.DownloadControl
@@ -48,15 +45,6 @@ class DownloadService : Service() {
         const val ACTION_CANCEL = "com.sari.tube.CANCEL"
         private const val TAG = "SariTube"
         private const val DEFAULT_SELECTOR = "bv*+ba/b"
-
-        /** Asks the running service to cancel one download. */
-        fun cancel(context: Context, id: Int) {
-            context.startService(
-                Intent(context, DownloadService::class.java)
-                    .setAction(ACTION_CANCEL)
-                    .putExtra(EXTRA_ID, id)
-            )
-        }
 
         fun start(context: Context, input: String, selector: String = DEFAULT_SELECTOR, audioOnly: Boolean = false) {
             val intent = Intent(context, DownloadService::class.java)
@@ -108,21 +96,17 @@ class DownloadService : Service() {
         id: Int, input: String, control: DownloadControl, selector: String, audioOnly: Boolean
     ) {
         var holdsSlot = false
-        ActiveDownloads.put(queuedState(id, input))
         try {
             waitForSlot(id, control)
             holdsSlot = true
-            ActiveDownloads.modify(id) { it.copy(state = DlState.RUNNING, message = "جارٍ التحميل") }
 
             val url = UrlParser.firstHttpUrl(input)
             if (url != null) downloadSmart(id, input, url, control, selector, audioOnly)
             else downloadDirect(id, input, control)
         } catch (e: DownloadCancelledException) {
-            ActiveDownloads.remove(id)
             notifier.cancelled(id)
         } catch (e: Exception) {
             Log.e(TAG, "download failed (id=$id, input=$input)", e)
-            ActiveDownloads.modify(id) { it.copy(state = DlState.FAILED, message = e.message ?: "خطأ غير معروف") }
             notifier.failed(id, e.message ?: "خطأ غير معروف")
         } finally {
             if (holdsSlot) activeSlots.decrementAndGet()
@@ -173,7 +157,6 @@ class DownloadService : Service() {
             if (now - last >= 1000) {
                 last = now
                 val remaining = if (eta > 0) "  •  متبقٍ ${eta} ث" else ""
-                ActiveDownloads.modify(id) { it.copy(percent = percent.toInt(), etaSec = eta.toLong(), message = "جارٍ التحميل") }
                 notifier.percent(id, "تحميل الوسائط", percent.toInt(), "${percent.toInt()}%$remaining")
             }
         }
@@ -182,7 +165,6 @@ class DownloadService : Service() {
             Regex("^${Regex.escape(YtDlpDownloader.idFor(url))}_"), ""
         )
         finishFile(id, file, displayName, YtDlpDownloader.mimeFor(file.name))
-        removeYtdlLeftovers(url)
     }
 
     private suspend fun downloadDirect(id: Int, input: String, control: DownloadControl) {
@@ -196,41 +178,11 @@ class DownloadService : Service() {
             val now = System.currentTimeMillis()
             if (now - last >= 1000) {
                 last = now
-                ActiveDownloads.modify(id) {
-                    it.copy(
-                        title = name,
-                        percent = if (total > 0) (downloaded * 100 / total).toInt() else -1,
-                        downloadedBytes = downloaded,
-                        totalBytes = total,
-                        speedBps = speed,
-                        message = "جارٍ التحميل"
-                    )
-                }
                 notifier.progress(id, name, downloaded, total, speed)
             }
         }
         finishFile(id, temp, chosen.fileName, chosen.mime)
         File(temp.parentFile, temp.name + ".parts").deleteRecursively()
-    }
-
-    private fun queuedState(id: Int, input: String) = ActiveDownload(
-        id = id,
-        title = input.trim().take(60),
-        state = DlState.QUEUED,
-        percent = -1,
-        downloadedBytes = 0L,
-        totalBytes = -1L,
-        speedBps = -1L,
-        etaSec = -1L,
-        message = "في الانتظار"
-    )
-
-    /** yt-dlp writes thumbnails and info files next to the video. Remove them after success. */
-    private fun removeYtdlLeftovers(url: String) {
-        val id = YtDlpDownloader.idFor(url)
-        File(cacheDir, "ytdl").listFiles { f ->
-            f.name.startsWith("${id}_") || f.name.startsWith("$id.")
-        }?.forEach { it.delete() }
     }
 
     /** Copies the file to Downloads, records it in history, then removes the temporary copy. */
@@ -240,7 +192,6 @@ class DownloadService : Service() {
             .onFailure { Log.w(TAG, "history record failed", it) }
         src.delete()
         notifier.done(id, name, PublicSaver.FOLDER, uri, mime)
-        ActiveDownloads.remove(id)
     }
 
     /** Waits in the queue until fewer downloads than the chosen limit are running. */

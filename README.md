@@ -1,4 +1,4 @@
-# SARI Loop
+# SARI TUBE
 
 - التطبيق يبنى تلقائياً عبر GitHub Actions (`.github/workflows/build.yml`) ويُرفع الـ APK كـ artifact.
 - الحد الأدنى: Android 10 (API 29).

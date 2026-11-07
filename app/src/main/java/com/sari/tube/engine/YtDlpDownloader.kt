@@ -91,9 +91,6 @@ object YtDlpDownloader {
             addOption("--no-mtime")
             addOption("--continue")
             addOption("--newline")
-            // Parallel fragments speed up HLS/DASH; a larger chunk reduces per-chunk throttling.
-            addOption("--concurrent-fragments", "4")
-            addOption("--http-chunk-size", "10M")
         }
 
         // yt-dlp does not stop on its own when the user cancels, so a watcher kills the process.
@@ -155,7 +152,7 @@ object YtDlpDownloader {
     /** Picks the final file and skips fragments such as .f137.mp4 and partial files. */
     private fun findOutput(dir: File, id: String): File {
         val file = dir.listFiles { f ->
-            (f.name.startsWith("${id}_") || f.name.startsWith("$id.")) &&
+            f.name.startsWith(id) &&
                 f.extension.lowercase() in OUTPUT_EXT &&
                 !FRAGMENT_REGEX.containsMatchIn(f.name)
         }?.maxByOrNull { it.length() }
