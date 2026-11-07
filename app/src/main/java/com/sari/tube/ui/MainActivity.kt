@@ -69,6 +69,8 @@ import com.sari.tube.ui.search.SearchViewModel
 private const val TAB_TOOLS = 0
 private const val TAB_PLAY = 1
 private const val TAB_DOWNLOAD = 2
+private const val TOOLS_GRID = 0
+private const val TOOLS_DOWNLOAD = 1
 
 class MainActivity : ComponentActivity() {
     private val askNotifications =
@@ -83,6 +85,7 @@ class MainActivity : ComponentActivity() {
                 var searching by rememberSaveable { mutableStateOf(false) }
                 var pendingQuery by rememberSaveable { mutableStateOf("") }
                 var sheetUrl by rememberSaveable { mutableStateOf<String?>(null) }
+                var toolsPage by rememberSaveable { mutableStateOf(TOOLS_GRID) }
 
                 Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -101,7 +104,16 @@ class MainActivity : ComponentActivity() {
                                     onDownload = { url, sel, aud -> startDownload(url, sel, aud) }
                                 )
                             }
-                            tab == TAB_TOOLS -> SettingsScreen(onBack = { tab = TAB_DOWNLOAD })
+                            tab == TAB_TOOLS -> when (toolsPage) {
+                                TOOLS_DOWNLOAD -> SettingsScreen(
+                                    onBack = { toolsPage = TOOLS_GRID }
+                                )
+                                else -> ToolsScreen(
+                                    onOpenDownloadSettings = {
+                                        toolsPage = TOOLS_DOWNLOAD
+                                    }
+                                )
+                            }
                             tab == TAB_PLAY -> DownloadsScreen(onBack = { tab = TAB_DOWNLOAD })
                             else -> HomeScreen(
                                 onSearch = { q ->
@@ -133,6 +145,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startDownload(url: String, selector: String = "bv*+ba/b", audio: Boolean = false) {
+        if (!AppPrefs.allowMobileData(this) &&
+            !AppPrefs.isOnWifiOrEthernet(this)
+        ) {
+            Toast.makeText(
+                this,
+                "التنزيل مقيّد على Wi-Fi حسب الإعدادات",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {

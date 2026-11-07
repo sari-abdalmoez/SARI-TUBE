@@ -1,6 +1,8 @@
 package com.sari.tube.engine
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 
 /** User settings for downloads, stored in this app's private SharedPreferences. */
 object AppPrefs {
@@ -21,6 +23,25 @@ object AppPrefs {
     fun setSpeedKbps(c: Context, value: Int) {
         prefs(c).edit().putInt("speed_kbps", value.coerceAtLeast(0)).apply()
         applyRate(c)
+    }
+
+    /** Whether downloads may start over mobile data. */
+    fun allowMobileData(c: Context): Boolean =
+        prefs(c).getBoolean("mobile_data", true)
+
+    fun setAllowMobileData(c: Context, value: Boolean) {
+        prefs(c).edit().putBoolean("mobile_data", value).apply()
+    }
+
+    /** True only when the active default network is Wi-Fi or Ethernet. */
+    fun isOnWifiOrEthernet(c: Context): Boolean {
+        val cm = c.getSystemService(ConnectivityManager::class.java)
+            ?: return false
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+            ?: return false
+
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
     }
 
     /** Pushes the saved speed cap into the downloader. Call at app start. */
