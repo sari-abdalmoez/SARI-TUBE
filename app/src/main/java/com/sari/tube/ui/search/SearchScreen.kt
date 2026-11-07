@@ -10,7 +10,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 
 import androidx.compose.ui.platform.LocalContext
 
-import androidx.compose.runtime.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveable
 
 import androidx.compose.runtime.DisposableEffect
 
@@ -291,7 +291,7 @@ private fun LocalVideoPanel() {
         }
     }
 
-    val player = remember(selectedUri) {
+    val player: ExoPlayer? = remember(selectedUri) {
         selectedUri?.let { uri ->
             ExoPlayer.Builder(context).build().apply {
                 setMediaItem(MediaItem.fromUri(uri))
