@@ -17,6 +17,9 @@ class YtUnsupportedException(message: String) : YtDlpException(message)
 /** Access is blocked (private, removed, login, region). No other engine can get around this. */
 class YtBlockedException(message: String) : YtDlpException(message)
 
+/** HTTP 403 may be caused by an outdated extractor. */
+class YtHttp403Exception(message: String) : YtDlpException(message)
+
 /**
  * Downloads one item with yt-dlp.
  *
@@ -142,7 +145,7 @@ object YtDlpDownloader {
             raw.contains("HTTP Error 429", true) ->
                 YtDlpException("الموقع يحد الطلبات مؤقتاً، جرّب بعد قليل")
             raw.contains("HTTP Error 403", true) ->
-                YtDlpException("رفض الموقع الطلب (403)، وقد يحتاج المحرك إلى تحديث")
+                YtHttp403Exception("رفض الموقع الطلب (403)، سيتم تحديث محرك الاستخراج وإعادة المحاولة")
             raw.contains("SSL", true) ->
                 YtDlpException("تعذّر التحقق من شهادة SSL للموقع")
             else -> YtDlpException("فشل الاستخراج: $firstLine")

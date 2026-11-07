@@ -19,6 +19,8 @@ import com.sari.tube.engine.UrlParser
 import com.sari.tube.engine.YtBlockedException
 import com.sari.tube.engine.YtDlpDownloader
 import com.sari.tube.engine.YtDlpEngine
+import com.sari.tube.engine.YtDlpUpdater
+import com.sari.tube.engine.YtHttp403Exception
 import com.sari.tube.engine.YtDlpException
 import com.sari.tube.storage.HistoryStore
 import com.sari.tube.storage.PublicSaver
@@ -147,6 +149,42 @@ class DownloadService : Service() {
             throw e
         } catch (e: YtBlockedException) {
             throw e
+        } catch (e: YtHttp403Exception) {
+            // Refresh the bundled yt-dlp extractor, then retry the same URL once.
+            val updateStatus = YtDlpUpdater.forceUpdate(this)
+            Log.w(TAG, "HTTP 403; extractor refresh result: $updateStatus")
+
+            var failure: YtDlpException = e
+
+            if (updateStatus.startsWith("update:")) {
+                try {
+                    downloadWithYtDlp(id, url, control, selector, audioOnly)
+                    return
+                } catch (retry: DownloadCancelledException) {
+                    throw retry
+                } catch (retry: YtBlockedException) {
+                    throw retry
+                } catch (retry: Exception) {
+                    failure = retry as? YtDlpException
+                        ?: YtDlpException(retry.message ?: "فشلت إعادة المحاولة بعد تحديث المحرك")
+                    Log.w(TAG, "yt-dlp retry failed: ${retry.message}")
+                }
+            } else {
+                failure = YtDlpException(
+                    "${e.message} (تعذر تحديث المحرك: $updateStatus)"
+                )
+            }
+
+            // The fallback is allowed only for a verified direct media URL.
+            try {
+                downloadDirect(id, input, control)
+            } catch (fallback: DownloadCancelledException) {
+                throw fallback
+            } catch (fallback: Exception) {
+                throw IOException(
+                    "${failure.message}\nالمحرك الاحتياطي: ${fallback.message}"
+                )
+            }
         } catch (e: YtDlpException) {
             Log.w(TAG, "yt-dlp failed, using fallback engine: ${e.message}")
             try {
@@ -269,7 +307,7 @@ class DownloadService : Service() {
         for (round in 1..2) {
             val candidates = MediaResolver.candidates(input)
             if (candidates.isEmpty()) {
-                lastError = "الرابط غير صالح"
+                lastError = "لم يتم العثور على رابط ملف وسائط مباشر؛ لن يتم تنزيل صفحة الموقع كأنها فيديو"
                 break
             }
             for (c in candidates) {
