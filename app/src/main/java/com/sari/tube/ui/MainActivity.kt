@@ -195,7 +195,6 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
     ) {
         NavItem("الأدوات", ToolsGrid, selected == TAB_TOOLS) { onSelect(TAB_TOOLS) }
         NavItem("تشغيل", PlayLibrary, selected == TAB_PLAY) { onSelect(TAB_PLAY) }
-        NavItem("تنزيل", DownloadArrow, selected == TAB_DOWNLOAD) { onSelect(TAB_DOWNLOAD) }
     }
 }
 
@@ -246,7 +245,7 @@ fun HomeScreen(
                     text = ""
                 }
             },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().offset(y = (-28).dp)
         )
     }
 }

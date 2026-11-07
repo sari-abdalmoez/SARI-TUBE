@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.saveable.rememberSaveable
 
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 
 import androidx.activity.result.contract.ActivityResultContracts
 
@@ -21,6 +22,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import android.content.Intent
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -71,6 +73,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
+import com.sari.tube.engine.YtDlpEngine
+import com.sari.tube.engine.YtDlpLock
 import java.util.Locale
 
 @Composable
@@ -82,6 +90,65 @@ fun SearchScreen(
     val tabs = SearchTab.entries
     val selectedIndex = tabs.indexOf(vm.tab)
     var pick by remember { mutableStateOf<VideoItem?>(null) }
+    val context = LocalContext.current
+
+    var playItem by remember { mutableStateOf<VideoItem?>(null) }
+    var streamUrl by remember { mutableStateOf<String?>(null) }
+    var playbackError by remember { mutableStateOf<String?>(null) }
+    var resolving by remember { mutableStateOf(false) }
+
+    LaunchedEffect(playItem) {
+        val selected = playItem ?: return@LaunchedEffect
+        streamUrl = null
+        playbackError = null
+        resolving = true
+
+        try {
+            if (!YtDlpEngine.awaitReady()) {
+                error("محرك التشغيل لم يجهز")
+            }
+
+            val output = withContext(Dispatchers.IO) {
+                val request = YoutubeDLRequest(selected.url).apply {
+                    addOption("-g")
+                    addOption("-f", "best[height<=720]/best")
+                    addOption("--no-playlist")
+                    addOption("--no-warnings")
+                }
+
+                YtDlpLock.shared {
+                    YoutubeDL.getInstance().execute(
+                        request,
+                        "inline-play-${System.nanoTime()}"
+                    ).out
+                }
+            }
+
+            streamUrl = output.lineSequence()
+                .map { it.trim() }
+                .firstOrNull {
+                    it.startsWith("https://") || it.startsWith("http://")
+                } ?: error("لم يتم العثور على رابط تشغيل مباشر")
+        } catch (e: Exception) {
+            playbackError = "تعذر التشغيل: ${e.message.orEmpty().take(120)}"
+        } finally {
+            resolving = false
+        }
+    }
+
+    val player: ExoPlayer? = remember(streamUrl) {
+        streamUrl?.let { url ->
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(url))
+                prepare()
+                playWhenReady = true
+            }
+        }
+    }
+
+    DisposableEffect(player) {
+        onDispose { player?.release() }
+    }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(
@@ -111,7 +178,7 @@ fun SearchScreen(
             selectedTabIndex = selectedIndex,
             edgePadding = 12.dp,
             containerColor = MaterialTheme.colorScheme.background,
-            contentColor = MaterialTheme.colorScheme.primary
+            contentColor = Color.White
         ) {
             tabs.forEachIndexed { i, t ->
                 Tab(
@@ -122,7 +189,64 @@ fun SearchScreen(
             }
         }
 
-        if (vm.tab == SearchTab.LOCAL) {
+        if (playItem != null) {
+            Column(
+                Modifier.fillMaxSize().padding(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        playItem?.title.orEmpty(),
+                        modifier = Modifier.weight(1f),
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    IconButton(onClick = {
+                        playItem = null
+                        streamUrl = null
+                    }) {
+                        Icon(
+                            Icons.Filled.ArrowBack,
+                            contentDescription = "إغلاق المشغل",
+                            tint = Color.White
+                        )
+                    }
+                }
+
+                when {
+                    resolving -> Box(
+                        Modifier.fillMaxWidth().weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = Color.White)
+                    }
+
+                    playbackError != null -> Box(
+                        Modifier.fillMaxWidth().weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            playbackError.orEmpty(),
+                            color = Color.White,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    player != null -> AndroidView(
+                        factory = { viewContext ->
+                            PlayerView(viewContext).apply {
+                                useController = true
+                                this.player = player
+                            }
+                        },
+                        update = { it.player = player },
+                        modifier = Modifier.fillMaxWidth().weight(1f)
+                    )
+
+                    else -> Spacer(Modifier.weight(1f))
+                }
+            }
+        } else if (vm.tab == SearchTab.LOCAL) {
             LocalVideoPanel()
         } else when (val s = vm.state) {
             SearchUiState.Idle -> Spacer(Modifier.fillMaxSize())
@@ -161,7 +285,11 @@ fun SearchScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             items(visible, key = { it.id }) { item ->
-                                VideoCard(item = item, onDownload = { pick = item })
+                                VideoCard(
+                                    item = item,
+                                    onPlay = { playItem = item },
+                                    onDownload = { pick = item }
+                                )
                             }
                         }
                     }
@@ -182,12 +310,13 @@ fun SearchScreen(
 }
 
 @Composable
-private fun VideoCard(item: VideoItem, onDownload: () -> Unit) {
+private fun VideoCard(item: VideoItem, onPlay: () -> Unit, onDownload: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onPlay)
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

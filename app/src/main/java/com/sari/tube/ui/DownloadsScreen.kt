@@ -138,7 +138,7 @@ fun PlayScreen(onBack: () -> Unit) {
                 Icon(
                     if (searchVisible) Icons.Filled.Close else Icons.Filled.Search,
                     contentDescription = "بحث",
-                    tint = playAccent
+                    tint = Color.White
                 )
             }
         }
@@ -248,7 +248,7 @@ private fun SectionTitle(
         Spacer(Modifier.width(8.dp))
         Text(
             text = count.toString(),
-            color = playAccent,
+            color = Color.White,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold
         )
