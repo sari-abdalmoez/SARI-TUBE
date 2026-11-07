@@ -9,7 +9,7 @@
         android:allowBackup="false"
         android:extractNativeLibs="true"
         android:requestLegacyExternalStorage="true"
-        android:label="SARI TUBE"
+        android:label="SARI Loop"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 

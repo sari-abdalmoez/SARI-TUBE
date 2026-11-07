@@ -209,7 +209,7 @@ fun HomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    "SARI TUBE",
+                    "SARI Loop",
                     fontSize = 36.sp,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.primary,

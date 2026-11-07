@@ -25,6 +25,14 @@ data class MediaOption(
  */
 object MediaFormats {
     private val counter = AtomicLong(0)
+    private const val TTL_MS = 10 * 60_000L
+
+    private class Cached(val at: Long, val options: List<MediaOption>)
+
+    /** Recently analyzed links. Reopening the same link within 10 minutes skips another yt-dlp call. */
+    private val cache = object : LinkedHashMap<String, Cached>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Cached>?): Boolean = size > 32
+    }
     private val VIDEO_TIERS = listOf(360, 480, 720, 1080)
 
     private data class Fmt(
@@ -38,6 +46,9 @@ object MediaFormats {
     )
 
     suspend fun fetch(url: String): List<MediaOption> = withContext(Dispatchers.IO) {
+        synchronized(cache) { cache[url] }?.let { c ->
+            if (System.currentTimeMillis() - c.at < TTL_MS) return@withContext c.options
+        }
         if (!YtDlpEngine.awaitReady()) throw SearchException("محرك yt-dlp لم يجهز بعد، حاول لاحقاً")
         val processId = "fmt-${counter.incrementAndGet()}"
         val request = YoutubeDLRequest(url).apply {
@@ -52,7 +63,9 @@ object MediaFormats {
         } catch (e: Exception) {
             throw SearchException("تعذّر قراءة التنسيقات: ${e.message?.lineSequence()?.firstOrNull().orEmpty().take(160)}")
         }
-        parse(out)
+        val options = parse(out)
+        synchronized(cache) { cache[url] = Cached(System.currentTimeMillis(), options) }
+        options
     }
 
     fun parse(out: String): List<MediaOption> {
