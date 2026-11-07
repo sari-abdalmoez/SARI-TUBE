@@ -8,6 +8,12 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateColor
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -208,12 +214,23 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth().offset(y = (-48).dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                val brandTransition = rememberInfiniteTransition(label = "sari-loop-brand")
+                val brandColor by brandTransition.animateColor(
+                    initialValue = Color(0xFFFFD54F),
+                    targetValue = Color(0xFFFF6D00),
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 7000, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "sari-loop-color"
+                )
+
                 Text(
-                    "SARI TUBE",
-                    fontSize = 36.sp,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 2.sp
+                    "SARI LOOP",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = brandColor,
+                    letterSpacing = 1.8.sp
                 )
                 Spacer(Modifier.height(36.dp))
 
