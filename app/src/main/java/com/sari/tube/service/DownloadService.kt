@@ -217,11 +217,13 @@ class DownloadService : Service() {
             if (now - last >= 1000) {
                 last = now
                 val remaining = if (eta > 0) "  •  متبقٍ ${eta} ث" else ""
-                notifier.percent(id, "تحميل الوسائط", percent.toInt(), "${percent.toInt()}%$remaining")
+                val pct = percent.toInt()
+                if (pct >= 0) notifier.percent(id, "تحميل الوسائط", pct, "$pct%$remaining")
+                else notifier.progress(id, "تحميل الوسائط", 0, 0, 0, indeterminate = true)
                 ActiveDownloads.updateProgress(
                     id,
                     title = "تحميل الوسائط",
-                    progress = percent.toInt(),
+                    progress = if (percent >= 0) percent.toInt() else null,
                     etaSeconds = eta,
                     message = remaining
                 )
@@ -231,7 +233,8 @@ class DownloadService : Service() {
         val displayName = file.name.replaceFirst(
             Regex("^${Regex.escape(YtDlpDownloader.idFor(url))}_"), ""
         )
-        finishFile(id, file, displayName, YtDlpDownloader.mimeFor(file.name))
+        finishFile(id, file, displayName, YtDlpDownloader.mimeFor(file.name), findCover(url))
+        removeYtdlLeftovers(url)
     }
 
     private suspend fun downloadDirect(id: Int, input: String, control: DownloadControl) {
@@ -272,12 +275,30 @@ class DownloadService : Service() {
     }
 
     /** Copies the file to Downloads, records it in history, then removes the temporary copy. */
-    private fun finishFile(id: Int, src: File, name: String, mime: String) {
+    /** yt-dlp writes the thumbnail next to the media file. It becomes the cover of the saved item. */
+    private fun findCover(url: String): File? {
+        val id = YtDlpDownloader.idFor(url)
+        return File(cacheDir, "ytdl").listFiles { f ->
+            f.extension.lowercase() == "jpg" && (f.name.startsWith("${id}_") || f.name.startsWith("$id."))
+        }?.maxByOrNull { it.lastModified() }
+    }
+
+    /** Removes the info and partial files yt-dlp leaves after a successful download. */
+    private fun removeYtdlLeftovers(url: String) {
+        val id = YtDlpDownloader.idFor(url)
+        File(cacheDir, "ytdl").listFiles { f ->
+            f.name.startsWith("${id}_") || f.name.startsWith("$id.")
+        }?.forEach { it.delete() }
+    }
+
+    private fun finishFile(id: Int, src: File, name: String, mime: String, cover: File? = null) {
         val uri = PublicSaver.save(this, src, name, mime)
-        runCatching { HistoryStore.add(this, src, name, mime, uri.toString()) }
+        val rec = runCatching { HistoryStore.add(this, src, name, mime, uri.toString(), cover) }
             .onFailure { Log.w(TAG, "history record failed", it) }
+            .getOrNull()
         src.delete()
-        notifier.done(id, name, PublicSaver.FOLDER, uri, mime)
+        cover?.delete()
+        notifier.done(id, name, PublicSaver.FOLDER, uri, mime, rec?.thumbPath)
     }
 
     /** Waits in the queue until fewer downloads than the chosen limit are running. */

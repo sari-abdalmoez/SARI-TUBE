@@ -1,5 +1,7 @@
 package com.sari.tube.service
 
+import android.graphics.BitmapFactory
+
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -84,7 +86,7 @@ class DownloadNotifier(private val context: Context) {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
 
-    fun done(id: Int, name: String, folder: String, uri: Uri, mime: String) {
+    fun done(id: Int, name: String, folder: String, uri: Uri, mime: String, thumbPath: String? = null) {
         val open = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, mime)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -93,6 +95,7 @@ class DownloadNotifier(private val context: Context) {
         nm.notify(
             id,
             base(CH_DONE)
+                .setLargeIcon(thumbPath?.let { BitmapFactory.decodeFile(it) })
                 .setContentTitle("تم التحميل ✓")
                 .setContentText(name)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))

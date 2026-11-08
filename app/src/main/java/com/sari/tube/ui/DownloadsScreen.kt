@@ -1,5 +1,9 @@
 package com.sari.tube.ui
 
+import androidx.compose.foundation.combinedClickable
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -72,6 +76,8 @@ fun PlayScreen(onBack: () -> Unit) {
     var searchVisible by rememberSaveable {
         mutableStateOf(false)
     }
+    // Not saveable on purpose: a Set<String> cannot be restored by rememberSaveable.
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var query by rememberSaveable {
         mutableStateOf("")
     }
@@ -143,6 +149,35 @@ fun PlayScreen(onBack: () -> Unit) {
             }
         }
 
+        if (selectedIds.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { selectedIds = emptySet() }) {
+                    Icon(Icons.Filled.Close, contentDescription = "إلغاء التحديد", tint = Color.White)
+                }
+                Text(
+                    text = "${selectedIds.size} عنصر",
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f).padding(start = 6.dp)
+                )
+                TextButton(onClick = {
+                    selectedIds = if (selectedIds.size == filteredRecords.size) emptySet()
+                    else filteredRecords.map { it.id }.toSet()
+                }) {
+                    Text(
+                        if (selectedIds.size == filteredRecords.size) "إلغاء الكل" else "تحديد الكل",
+                        color = Color(0xFFFFC53D)
+                    )
+                }
+            }
+        }
+
         if (searchVisible) {
             OutlinedTextField(
                 value = query,
@@ -157,7 +192,7 @@ fun PlayScreen(onBack: () -> Unit) {
         }
 
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(
                 start = 14.dp,
                 end = 14.dp,
@@ -216,7 +251,12 @@ fun PlayScreen(onBack: () -> Unit) {
                 ) { record ->
                     CompletedDownloadCard(
                         record = record,
-                        onOpen = { openDownload(context, record) },
+                        selected = record.id in selectedIds,
+                        onLongPress = { selectedIds = selectedIds.toggle(record.id) },
+                        onOpen = {
+                            if (selectedIds.isNotEmpty()) selectedIds = selectedIds.toggle(record.id)
+                            else openDownload(context, record)
+                        },
                         onRemove = {
                             HistoryStore.remove(context, record.id)
                             records = records.filterNot { it.id == record.id }
@@ -225,8 +265,36 @@ fun PlayScreen(onBack: () -> Unit) {
                 }
             }
         }
+
+        if (selectedIds.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xFFFFC53D))
+                    .clickable {
+                        val chosen = filteredRecords.filter { it.id in selectedIds }
+                        chosen.forEach { rec ->
+                            // Removes the file itself when the app owns it; otherwise only the list entry.
+                            runCatching { context.contentResolver.delete(Uri.parse(rec.uri), null, null) }
+                            HistoryStore.remove(context, rec.id)
+                        }
+                        records = records.filterNot { r -> chosen.any { it.id == r.id } }
+                        Toast.makeText(context, "تم حذف ${chosen.size} عنصر", Toast.LENGTH_SHORT).show()
+                        selectedIds = emptySet()
+                    }
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("حذف", color = Color(0xFF141414), fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            }
+        }
     }
 }
+
+/** Adds or removes an id from a selection set. */
+private fun Set<String>.toggle(id: String): Set<String> = if (id in this) this - id else this + id
 
 @Composable
 private fun SectionTitle(
@@ -379,9 +447,12 @@ private fun ActiveDownloadCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CompletedDownloadCard(
     record: DownloadRecord,
+    selected: Boolean = false,
+    onLongPress: () -> Unit = {},
     onOpen: () -> Unit,
     onRemove: () -> Unit
 ) {
@@ -400,8 +471,8 @@ private fun CompletedDownloadCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(17.dp))
-            .background(playCard)
-            .clickable(onClick = onOpen)
+            .background(if (selected) Color(0x33FFC53D) else playCard)
+            .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

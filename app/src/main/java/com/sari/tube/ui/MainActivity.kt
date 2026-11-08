@@ -1,5 +1,7 @@
 package com.sari.tube.ui
 
+import androidx.activity.compose.BackHandler
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -86,6 +88,15 @@ class MainActivity : ComponentActivity() {
                 var pendingQuery by rememberSaveable { mutableStateOf("") }
                 var sheetUrl by rememberSaveable { mutableStateOf<String?>(null) }
                 var toolsPage by rememberSaveable { mutableStateOf(TOOLS_GRID) }
+
+                // Back goes one step: search -> home, tools subpage -> tools grid, other tabs -> home.
+                BackHandler(enabled = searching || tab != TAB_DOWNLOAD || toolsPage != TOOLS_GRID) {
+                    when {
+                        searching -> { searching = false }
+                        tab == TAB_TOOLS && toolsPage != TOOLS_GRID -> { toolsPage = TOOLS_GRID }
+                        else -> { tab = TAB_DOWNLOAD }
+                    }
+                }
 
                 Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
