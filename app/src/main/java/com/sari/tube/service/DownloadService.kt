@@ -234,6 +234,7 @@ class DownloadService : Service() {
             Regex("^${Regex.escape(YtDlpDownloader.idFor(url))}_"), ""
         )
         finishFile(id, file, displayName, YtDlpDownloader.mimeFor(file.name), findCover(url))
+        saveSubtitles(url, displayName)
         removeYtdlLeftovers(url)
     }
 
@@ -281,6 +282,19 @@ class DownloadService : Service() {
         return File(cacheDir, "ytdl").listFiles { f ->
             f.extension.lowercase() == "jpg" && (f.name.startsWith("${id}_") || f.name.startsWith("$id."))
         }?.maxByOrNull { it.lastModified() }
+    }
+
+    /** Captions that yt-dlp fetched are saved next to the media as <name>.<lang>.vtt. */
+    private fun saveSubtitles(url: String, displayName: String) {
+        val id = YtDlpDownloader.idFor(url)
+        val base = displayName.substringBeforeLast('.')
+        File(cacheDir, "ytdl").listFiles { f ->
+            f.extension.lowercase() == "vtt" && (f.name.startsWith("${id}_") || f.name.startsWith("$id."))
+        }?.forEach { sub ->
+            val lang = sub.nameWithoutExtension.substringAfterLast('.', "sub")
+            runCatching { PublicSaver.save(this, sub, "$base.$lang.vtt", "text/vtt") }
+                .onFailure { Log.w(TAG, "subtitle save failed", it) }
+        }
     }
 
     /** Removes the info and partial files yt-dlp leaves after a successful download. */

@@ -9,7 +9,7 @@ import java.io.IOException
 
 /** Copies a finished file into the public Downloads folder (no storage permission needed on Android 10+). */
 object PublicSaver {
-    const val FOLDER = "Download/SARI TUBE"
+    const val FOLDER = "Download/SARI Loop"
 
     fun save(context: Context, src: File, displayName: String, mime: String): Uri {
         val resolver = context.contentResolver

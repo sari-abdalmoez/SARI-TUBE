@@ -1,7 +1,7 @@
-# SARI TUBE
+# SARI Loop
 
 - التطبيق يبنى تلقائياً عبر GitHub Actions (`.github/workflows/build.yml`) ويُرفع الـ APK كـ artifact.
 - الحد الأدنى: Android 10 (API 29).
-- الحفظ: `Download/SARI TUBE` عبر MediaStore (لا يحتاج صلاحية تخزين).
+- الحفظ: `Download/SARI Loop` عبر MediaStore (لا يحتاج صلاحية تخزين).
 - سلسلة المحاولات: DoodStream أولاً ثم الرابط المباشر، مع إعادة استخراج عند انتهاء الرابط.
 - تحذير: الاستخراج من DoodStream يعتمد على بنية صفحات الموقع الحالية وقد يتوقف عند تغييرها. استخدم التطبيق فقط لفيديوهات تملك حق تحميلها.

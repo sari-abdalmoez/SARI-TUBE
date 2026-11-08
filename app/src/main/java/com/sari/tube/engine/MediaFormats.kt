@@ -50,7 +50,7 @@ object MediaFormats {
         val out = try {
             YtDlpLock.shared { YoutubeDL.getInstance().execute(request, processId).out }
         } catch (e: Exception) {
-            throw SearchException("تعذّر قراءة التنسيقات: ${e.message?.lineSequence()?.firstOrNull().orEmpty().take(160)}")
+            throw SearchException(friendlyFormatError(e.message))
         }
         parse(out)
     }
@@ -141,6 +141,20 @@ object MediaFormats {
     /** When the site reports no usable list, offer a single best-quality download instead of inventing sizes. */
     private fun fallback(): List<MediaOption> =
         listOf(MediaOption("best", "أفضل جودة متاحة", false, null, "bv*+ba/b"))
+
+    /** Turns raw yt-dlp text into one clear sentence. The raw text is written to Logcat instead. */
+    fun friendlyFormatError(raw: String?): String {
+        val m = raw.orEmpty()
+        return when {
+            m.contains("Network is unreachable", true) || m.contains("Unable to download webpage", true) ||
+                m.contains("Name or service not known", true) || m.contains("timed out", true) ->
+                "لا يوجد اتصال بالإنترنت أو الموقع لا يستجيب. تحقق من الشبكة ثم أعد المحاولة"
+            m.contains("Unsupported URL", true) -> "هذا الرابط غير مدعوم"
+            m.contains("Private video", true) || m.contains("login", true) || m.contains("Sign in", true) ->
+                "هذا المحتوى يتطلب تسجيل دخول أو خاص، ولا يمكن تنزيله"
+            else -> "تعذّر قراءة الجودات لهذا الرابط. يمكنك تنزيله بأفضل جودة متاحة"
+        }
+    }
 
     private fun JSONObject.s(key: String): String = if (isNull(key)) "" else optString(key)
 }

@@ -1,5 +1,21 @@
 package com.sari.tube.ui
 
+import androidx.compose.ui.graphics.graphicsLayer
+
+import androidx.compose.animation.core.animateFloatAsState
+
+import kotlinx.coroutines.delay
+
+import com.sari.tube.engine.MediaFormats
+
+import androidx.lifecycle.LifecycleEventObserver
+
+import androidx.lifecycle.Lifecycle
+
+import androidx.compose.ui.platform.LocalLifecycleOwner
+
+import androidx.compose.runtime.DisposableEffect
+
 import androidx.activity.compose.BackHandler
 
 import android.Manifest
@@ -199,7 +215,7 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
+            .background(MaterialTheme.colorScheme.background)
             .navigationBarsPadding()
             .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
@@ -211,12 +227,18 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
 
 @Composable
 private fun NavItem(label: String, icon: ImageVector, active: Boolean, onClick: () -> Unit) {
+    val scale by animateFloatAsState(targetValue = if (active) 1.14f else 1f, label = "navScale")
     val tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         Modifier.clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(24.dp))
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(24.dp).graphicsLayer { scaleX = scale; scaleY = scale }
+        )
         Spacer(Modifier.height(2.dp))
         Text(
             label,
@@ -237,10 +259,38 @@ fun HomeScreen(
     val isLink = UrlParser.firstHttpUrl(trimmed) != null ||
         DoodResolver.extractId(trimmed) != null
 
+    val clipboard = LocalClipboardManager.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var copiedLink by remember { mutableStateOf<String?>(null) }
+    var dismissedLink by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Reads the clipboard when the app opens and whenever it returns to the foreground.
+    DisposableEffect(lifecycleOwner) {
+        fun readClipboard() {
+            val clip = clipboard.getText()?.text?.trim().orEmpty()
+            copiedLink = clip.takeIf { UrlParser.firstHttpUrl(it) != null }
+        }
+        readClipboard()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) readClipboard()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Formats are read in the background once a link is complete, so the format sheet opens faster.
+    LaunchedEffect(trimmed) {
+        if (isLink) {
+            delay(600)
+            runCatching { MediaFormats.fetch(trimmed) }
+        }
+    }
+
     Box(
         Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
+        FloatingDecor(Modifier.fillMaxSize())
         HomeHeader(
             value = text,
             onValueChange = { text = it },
@@ -258,5 +308,15 @@ fun HomeScreen(
             },
             modifier = Modifier.fillMaxWidth().offset(y = (-28).dp)
         )
+
+        val link = copiedLink
+        if (link != null && link != dismissedLink && link != trimmed) {
+            QuickLinkCard(
+                url = link,
+                onDownload = { onDownload(link) },
+                onDismiss = { dismissedLink = link },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp, vertical = 120.dp)
+            )
+        }
     }
 }

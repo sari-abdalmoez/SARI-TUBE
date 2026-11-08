@@ -60,12 +60,22 @@ object YtDlpDownloader {
         outDir.mkdirs()
         val id = idFor(url)
         return try {
-            runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = false)
+            runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = false, embedCover = audioOnly)
         } catch (e: YtDlpException) {
             if (control.isCancelled || e is YtBlockedException || e is YtUnsupportedException) throw e
-            if (!e.message.orEmpty().contains("rename", true)) throw e
-            Log.w(TAG, "rename failed, retrying with ASCII names: ${e.message}")
-            runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = true)
+            val msg = e.message.orEmpty()
+            when {
+                // Embedding the cover needs FFmpeg post-processing. If it fails, keep the audio and skip the cover.
+                audioOnly && !msg.contains("rename", true) -> {
+                    Log.w(TAG, "embedding cover failed, retrying without it: $msg")
+                    runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = false, embedCover = false)
+                }
+                msg.contains("rename", true) -> {
+                    Log.w(TAG, "rename failed, retrying with ASCII names: $msg")
+                    runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = true, embedCover = false)
+                }
+                else -> throw e
+            }
         }
     }
 
@@ -77,7 +87,8 @@ object YtDlpDownloader {
         selector: String,
         audioOnly: Boolean,
         onProgress: (percent: Float, etaSec: Long) -> Unit,
-        asciiNames: Boolean
+        asciiNames: Boolean,
+        embedCover: Boolean
     ): File {
         val processId = "dl-$id-${if (asciiNames) "a" else "t"}"
         // Keep the real media title in both normal and ASCII retry filenames.
@@ -90,6 +101,10 @@ object YtDlpDownloader {
             if (asciiNames) addOption("--restrict-filenames")
             addOption("--write-thumbnail")
             addOption("--convert-thumbnails", "jpg")
+            if (embedCover) addOption("--embed-thumbnail")
+            // Captions are saved as .vtt files when the video has them. No lyrics are invented.
+            addOption("--write-subs")
+            addOption("--sub-langs", "ar.*,en.*")
             addOption("--no-playlist")
             addOption("--no-mtime")
             addOption("--continue")
