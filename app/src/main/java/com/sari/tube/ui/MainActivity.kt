@@ -1,5 +1,9 @@
 package com.sari.tube.ui
 
+import com.sari.tube.engine.LinkInfo
+
+import androidx.compose.ui.platform.LocalContext
+
 import androidx.compose.ui.graphics.graphicsLayer
 
 import androidx.compose.animation.core.animateFloatAsState
@@ -228,7 +232,7 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
 @Composable
 private fun NavItem(label: String, icon: ImageVector, active: Boolean, onClick: () -> Unit) {
     val scale by animateFloatAsState(targetValue = if (active) 1.14f else 1f, label = "navScale")
-    val tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    val tint = if (active) Color.White else Color(0xFF8A8A94)
     Column(
         Modifier.clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -260,6 +264,7 @@ fun HomeScreen(
         DoodResolver.extractId(trimmed) != null
 
     val clipboard = LocalClipboardManager.current
+    val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var copiedLink by remember { mutableStateOf<String?>(null) }
     var dismissedLink by rememberSaveable { mutableStateOf<String?>(null) }
@@ -268,7 +273,10 @@ fun HomeScreen(
     DisposableEffect(lifecycleOwner) {
         fun readClipboard() {
             val clip = clipboard.getText()?.text?.trim().orEmpty()
-            copiedLink = clip.takeIf { UrlParser.firstHttpUrl(it) != null }
+            val link = clip.takeIf { UrlParser.firstHttpUrl(it) != null }
+            // The reminder appears at most twice for the same link.
+            copiedLink = link?.takeIf { AppPrefs.clipboardReminders(ctx, it) < 2 }
+            copiedLink?.let { AppPrefs.countClipboardReminder(ctx, it) }
         }
         readClipboard()
         val observer = LifecycleEventObserver { _, event ->
@@ -276,6 +284,14 @@ fun HomeScreen(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    var linkInfo by remember { mutableStateOf<LinkInfo?>(null) }
+    LaunchedEffect(copiedLink) {
+        val l = copiedLink ?: return@LaunchedEffect
+        linkInfo = null
+        runCatching { MediaFormats.fetch(l) }
+        linkInfo = MediaFormats.info(l)
     }
 
     // Formats are read in the background once a link is complete, so the format sheet opens faster.
@@ -313,6 +329,8 @@ fun HomeScreen(
         if (link != null && link != dismissedLink && link != trimmed) {
             QuickLinkCard(
                 url = link,
+                title = linkInfo?.title,
+                thumbnail = linkInfo?.thumbnail,
                 onDownload = { onDownload(link) },
                 onDismiss = { dismissedLink = link },
                 modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp, vertical = 120.dp)

@@ -1,5 +1,7 @@
 package com.sari.tube.engine
 
+import java.util.concurrent.ConcurrentHashMap
+
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +27,7 @@ data class MediaOption(
  */
 object MediaFormats {
     private val counter = AtomicLong(0)
+    private val infoCache = ConcurrentHashMap<String, LinkInfo>()
     private val VIDEO_TIERS = listOf(360, 480, 720, 1080)
 
     private data class Fmt(
@@ -52,7 +55,19 @@ object MediaFormats {
         } catch (e: Exception) {
             throw SearchException(friendlyFormatError(e.message))
         }
+        infoOf(out)?.let { infoCache[url] = it }
         parse(out)
+    }
+
+    /** Title and thumbnail from the last analysis of this link, if it was done. */
+    fun info(url: String): LinkInfo? = infoCache[url]
+
+    private fun infoOf(out: String): LinkInfo? {
+        val line = out.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("{") } ?: return null
+        val o = JSONObject(line)
+        val title = o.s("title").ifBlank { return null }
+        val thumb = o.s("thumbnail").takeIf { it.isNotBlank() }
+        return LinkInfo(title, thumb)
     }
 
     fun parse(out: String): List<MediaOption> {
@@ -135,6 +150,15 @@ object MediaFormats {
             result.add(MediaOption("v$tier", "${tier}p", false, total, "b[height<=$tier][ext=mp4]/bv*[height<=$tier]+ba[ext=m4a]/bv*[height<=$tier]+ba/b[height<=$tier]"))
         }
 
+        // Some sites (for example Instagram) give no height for their formats. Offer the best video anyway.
+        if (result.none { !it.isAudio }) {
+            val anyVideo = fmts.filter { it.hasVideo }
+                .maxWithOrNull(compareBy<Fmt>({ it.height }, { it.size ?: 0L }))
+            if (anyVideo != null) {
+                val total = anyVideo.size?.let { if (anyVideo.hasAudio) it else it + (bestAudio?.size ?: 0L) }
+                result.add(MediaOption("video_best", "فيديو · أفضل جودة متاحة", false, total, "bv*+ba/b"))
+            }
+        }
         return if (result.isEmpty()) fallback() else result
     }
 
@@ -158,3 +182,6 @@ object MediaFormats {
 
     private fun JSONObject.s(key: String): String = if (isNull(key)) "" else optString(key)
 }
+
+/** Title and thumbnail of a link, read from the same yt-dlp analysis. */
+data class LinkInfo(val title: String, val thumbnail: String?)

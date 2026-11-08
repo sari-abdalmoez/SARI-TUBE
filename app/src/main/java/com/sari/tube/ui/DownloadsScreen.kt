@@ -541,10 +541,10 @@ private fun EmptyPlayState(message: String) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
-                Icons.Filled.PlayArrow,
+                PlayLibrary,
                 contentDescription = null,
-                tint = playAccent,
-                modifier = Modifier.size(40.dp)
+                tint = playMuted,
+                modifier = Modifier.size(44.dp)
             )
             Spacer(Modifier.height(10.dp))
             Text(

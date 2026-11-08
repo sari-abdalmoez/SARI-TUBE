@@ -277,14 +277,15 @@ fun SearchScreen(
                         SearchTab.VIDEOS -> s.items.filterNot { SearchViewModel.isSong(it) }
                         else -> s.items
                     }
-                    if (visible.isEmpty()) {
-                        CenterMessage("لا توجد نتائج في هذا التبويب")
+                    val shown = if (visible.isEmpty()) s.items else visible
+                    if (shown.isEmpty()) {
+                        CenterMessage("لا توجد نتائج")
                     } else {
                         LazyColumn(
                             contentPadding = PaddingValues(12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            items(visible, key = { it.id }) { item ->
+                            items(shown, key = { it.id }) { item ->
                                 VideoCard(
                                     item = item,
                                     onPlay = { playItem = item },

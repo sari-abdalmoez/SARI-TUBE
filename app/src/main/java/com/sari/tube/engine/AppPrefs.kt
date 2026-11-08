@@ -6,6 +6,15 @@ import android.net.NetworkCapabilities
 
 /** User settings for downloads, stored in this app's private SharedPreferences. */
 object AppPrefs {
+    /** How many times the clipboard reminder was shown for this link. The reminder stops after two. */
+    fun clipboardReminders(c: Context, url: String): Int =
+        c.getSharedPreferences("sari_tube_prefs", Context.MODE_PRIVATE).getInt("clip_" + url.hashCode(), 0)
+
+    fun countClipboardReminder(c: Context, url: String) {
+        c.getSharedPreferences("sari_tube_prefs", Context.MODE_PRIVATE).edit()
+            .putInt("clip_" + url.hashCode(), clipboardReminders(c, url) + 1).apply()
+    }
+
     private const val NAME = "sari_tube_prefs"
 
     private fun prefs(c: Context) = c.getSharedPreferences(NAME, Context.MODE_PRIVATE)
