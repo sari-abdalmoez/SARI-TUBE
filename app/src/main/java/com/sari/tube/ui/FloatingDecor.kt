@@ -106,7 +106,7 @@ private fun DrawScope.drawDoodle(kind: Int, c: Offset, s: Float, color: Color, s
             drawPath(
                 Path().apply {
                     moveTo(c.x + s * 0.02f, c.y - s * 0.26f)
-                    quadTo(c.x + s * 0.28f, c.y - s * 0.2f, c.x + s * 0.2f, c.y - s * 0.02f)
+                    quadraticTo(c.x + s * 0.28f, c.y - s * 0.2f, c.x + s * 0.2f, c.y - s * 0.02f)
                 },
                 color,
                 style = stroke
@@ -153,12 +153,12 @@ private fun DrawScope.drawDoodle(kind: Int, c: Offset, s: Float, color: Color, s
 private fun roundRectPath(x: Float, y: Float, w: Float, h: Float, r: Float): Path = Path().apply {
     moveTo(x + r, y)
     lineTo(x + w - r, y)
-    quadTo(x + w, y, x + w, y + r)
+    quadraticTo(x + w, y, x + w, y + r)
     lineTo(x + w, y + h - r)
-    quadTo(x + w, y + h, x + w - r, y + h)
+    quadraticTo(x + w, y + h, x + w - r, y + h)
     lineTo(x + r, y + h)
-    quadTo(x, y + h, x, y + h - r)
+    quadraticTo(x, y + h, x, y + h - r)
     lineTo(x, y + r)
-    quadTo(x, y, x + r, y)
+    quadraticTo(x, y, x + r, y)
     close()
 }
