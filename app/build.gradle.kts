@@ -15,8 +15,8 @@ android {
         applicationId = "com.sari.tube"
         minSdk = 29
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.7.4"
+        versionCode = 13
+        versionName = "0.8.0"
     }
 
     buildFeatures { compose = true }
