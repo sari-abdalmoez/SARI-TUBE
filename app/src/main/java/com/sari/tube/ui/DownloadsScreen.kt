@@ -1,5 +1,15 @@
 package com.sari.tube.ui
 
+import androidx.compose.runtime.setValue
+
+import androidx.compose.runtime.getValue
+
+import androidx.compose.runtime.mutableStateOf
+
+import androidx.compose.ui.window.DialogProperties
+
+import androidx.compose.ui.window.Dialog
+
 import androidx.compose.foundation.combinedClickable
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -60,6 +70,15 @@ fun DownloadsScreen(onBack: () -> Unit) {
 
 @Composable
 fun PlayScreen(onBack: () -> Unit) {
+    var playing by remember { mutableStateOf<DownloadRecord?>(null) }
+    playing?.let { rec ->
+        Dialog(
+            onDismissRequest = { playing = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            InAppPlayer(uri = rec.uri, title = rec.name, onClose = { playing = null })
+        }
+    }
     val context = LocalContext.current
 
     val activeMap by ActiveDownloads.items.collectAsState()
@@ -255,7 +274,7 @@ fun PlayScreen(onBack: () -> Unit) {
                         onLongPress = { selectedIds = selectedIds.toggle(record.id) },
                         onOpen = {
                             if (selectedIds.isNotEmpty()) selectedIds = selectedIds.toggle(record.id)
-                            else openDownload(context, record)
+                            else playing = record
                         },
                         onRemove = {
                             HistoryStore.remove(context, record.id)

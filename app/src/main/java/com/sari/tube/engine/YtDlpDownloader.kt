@@ -65,6 +65,12 @@ object YtDlpDownloader {
             if (control.isCancelled || e is YtBlockedException || e is YtUnsupportedException) throw e
             val msg = e.message.orEmpty()
             when {
+                // A short network drop is common. One retry after a pause is worth it.
+                msg.contains("Network is unreachable", true) -> {
+                    Log.w(TAG, "network unreachable, retrying once: $msg")
+                    Thread.sleep(3000)
+                    runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = false, embedCover = audioOnly)
+                }
                 // Embedding the cover needs FFmpeg post-processing. If it fails, keep the audio and skip the cover.
                 audioOnly && !msg.contains("rename", true) -> {
                     Log.w(TAG, "embedding cover failed, retrying without it: $msg")
