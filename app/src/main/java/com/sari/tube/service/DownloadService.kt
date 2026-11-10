@@ -1,5 +1,9 @@
 package com.sari.tube.service
 
+import com.sari.tube.engine.MediaFormats
+
+import com.sari.tube.engine.DownloadRequest
+
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -91,6 +95,7 @@ class DownloadService : Service() {
         val audioOnly = intent.getBooleanExtra(EXTRA_AUDIO, false)
 
         val id = nextId++
+        ActiveDownloads.rememberRequest(id, DownloadRequest(input, selector, audioOnly))
         val control = DownloadControl()
         controls[id] = control
         ActiveDownloads.enqueue(id, input)
@@ -149,7 +154,8 @@ class DownloadService : Service() {
             throw e
         } catch (e: YtBlockedException) {
             throw e
-        } catch (e: YtHttp403Exception) {
+        } catch (e: YtDlpException) {
+            // Any extraction failure first refreshes yt-dlp, because sites change their pages often.
             // Refresh the bundled yt-dlp extractor, then retry the same URL once.
             val updateStatus = YtDlpUpdater.forceUpdate(this)
             Log.w(TAG, "HTTP 403; extractor refresh result: $updateStatus")
@@ -208,6 +214,9 @@ class DownloadService : Service() {
             message = "جارٍ تجهيز محرك التحميل"
         )
         if (!YtDlpEngine.awaitReady()) throw YtDlpException("محرك yt-dlp لم يجهز بعد")
+        // The cover of the item is shown in the download card instead of a placeholder.
+        runCatching { MediaFormats.fetch(url) }
+        MediaFormats.info(url)?.thumbnail?.let { ActiveDownloads.setThumbnail(id, it) }
 
         var last = 0L
         val file = YtDlpDownloader.download(

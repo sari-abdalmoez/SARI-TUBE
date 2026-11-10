@@ -19,8 +19,20 @@ data class ActiveDownload(
     val totalBytes: Long = 0L,
     val speedBytesPerSec: Long = 0L,
     val etaSeconds: Long = 0L,
-    val message: String = ""
+    val message: String = "",
+    val thumbnail: String? = null
 )
+
+/** What was asked for, kept so a failed download can be retried. */
+data class DownloadRequest(val input: String, val selector: String, val audioOnly: Boolean)
+
+private val requests = java.util.concurrent.ConcurrentHashMap<Int, DownloadRequest>()
+
+fun rememberRequest(id: Int, request: DownloadRequest) {
+    requests[id] = request
+}
+
+fun requestOf(id: Int): DownloadRequest? = requests[id]
 
 /**
  * In-memory state shared between DownloadService and the Compose UI.
@@ -31,6 +43,10 @@ object ActiveDownloads {
     private val mutableItems = MutableStateFlow<Map<Int, ActiveDownload>>(emptyMap())
 
     val items: StateFlow<Map<Int, ActiveDownload>> = mutableItems.asStateFlow()
+
+    fun setThumbnail(id: Int, url: String) {
+        mutate { map -> map[id]?.let { map[id] = it.copy(thumbnail = url) } }
+    }
 
     fun enqueue(id: Int, title: String) {
         mutate { map ->

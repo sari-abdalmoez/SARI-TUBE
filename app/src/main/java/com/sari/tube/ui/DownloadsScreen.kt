@@ -1,5 +1,9 @@
 package com.sari.tube.ui
 
+import coil.compose.AsyncImage
+
+import androidx.compose.material.icons.filled.Refresh
+
 import androidx.compose.runtime.setValue
 
 import androidx.compose.runtime.getValue
@@ -234,6 +238,7 @@ fun PlayScreen(onBack: () -> Unit) {
                 ) { item ->
                     ActiveDownloadCard(
                         item = item,
+                        onRetry = { retryDownload(context, item.id) },
                         onCancel = {
                             runCatching {
                                 DownloadService.cancel(context, item.id)
@@ -346,7 +351,8 @@ private fun SectionTitle(
 private fun ActiveDownloadCard(
     item: ActiveDownload,
     onCancel: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onRetry: () -> Unit = {}
 ) {
     val failed = item.state == DlState.FAILED
     val queued = item.state == DlState.QUEUED
@@ -368,12 +374,22 @@ private fun ActiveDownloadCard(
                     .background(Color(0xFF292930)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.Filled.PlayArrow,
-                    contentDescription = null,
-                    tint = playAccent,
-                    modifier = Modifier.size(25.dp)
-                )
+                val thumb = item.thumbnail
+                if (thumb != null) {
+                    AsyncImage(
+                        model = thumb,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        tint = playAccent,
+                        modifier = Modifier.size(25.dp)
+                    )
+                }
             }
 
             Column(
@@ -405,12 +421,11 @@ private fun ActiveDownloadCard(
             }
 
             if (failed) {
+                IconButton(onClick = onRetry) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "إعادة المحاولة", tint = playAccent)
+                }
                 IconButton(onClick = onRemove) {
-                    Icon(
-                        Icons.Filled.Delete,
-                        contentDescription = "إزالة",
-                        tint = Color(0xFFFF7168)
-                    )
+                    Icon(Icons.Filled.Close, contentDescription = "إزالة", tint = Color(0xFFFF7168))
                 }
             } else {
                 IconButton(onClick = onCancel) {
@@ -540,13 +555,6 @@ private fun CompletedDownloadCard(
             )
         }
 
-        IconButton(onClick = onRemove) {
-            Icon(
-                Icons.Filled.Delete,
-                contentDescription = "إزالة من القائمة",
-                tint = Color(0xFF85858E)
-            )
-        }
     }
 }
 
@@ -573,6 +581,12 @@ private fun EmptyPlayState(message: String) {
             )
         }
     }
+}
+
+private fun retryDownload(context: Context, id: Int) {
+    val req = com.sari.tube.engine.requestOf(id) ?: return
+    com.sari.tube.engine.ActiveDownloads.remove(id)
+    com.sari.tube.service.DownloadService.start(context, req.input, req.selector, req.audioOnly)
 }
 
 private fun openDownload(context: Context, record: DownloadRecord) {
