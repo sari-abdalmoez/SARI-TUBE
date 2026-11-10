@@ -1,5 +1,11 @@
 package com.sari.tube.ui.search
 
+import androidx.compose.runtime.snapshotFlow
+
+import androidx.compose.foundation.lazy.rememberLazyListState
+
+import androidx.activity.compose.BackHandler
+
 import androidx.media3.ui.PlayerView
 
 import androidx.media3.exoplayer.ExoPlayer
@@ -96,6 +102,19 @@ fun SearchScreen(
     var streamUrl by remember { mutableStateOf<String?>(null) }
     var playbackError by remember { mutableStateOf<String?>(null) }
     var resolving by remember { mutableStateOf(false) }
+
+    // Back closes the open player first, and only then leaves the search screen.
+    BackHandler(enabled = playItem != null) {
+        playItem = null
+        streamUrl = null
+    }
+
+    val listState = rememberLazyListState()
+    val readyCount = (vm.state as? SearchUiState.Ready)?.items?.size ?: 0
+    LaunchedEffect(listState, readyCount) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .collect { last -> if (readyCount > 0 && last >= readyCount - 2) vm.loadMore() }
+    }
 
     LaunchedEffect(playItem) {
         val selected = playItem ?: return@LaunchedEffect
@@ -282,9 +301,20 @@ fun SearchScreen(
                         CenterMessage("لا توجد نتائج")
                     } else {
                         LazyColumn(
+                            state = listState,
                             contentPadding = PaddingValues(12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+                            if (vm.loadingMore) {
+                                item {
+                                    Box(
+                                        Modifier.fillMaxWidth().padding(16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
                             items(shown, key = { it.id }) { item ->
                                 VideoCard(
                                     item = item,

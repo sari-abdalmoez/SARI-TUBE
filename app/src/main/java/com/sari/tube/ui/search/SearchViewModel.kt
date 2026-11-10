@@ -31,11 +31,17 @@ enum class SearchTab(val label: String) {
 sealed interface SearchUiState {
     data object Idle : SearchUiState
     data object Loading : SearchUiState
-    data class Ready(val items: List<VideoItem>) : SearchUiState
+    data class Ready(val items: List<VideoItem>, val hasMore: Boolean = false) : SearchUiState
     data class Failed(val message: String) : SearchUiState
 }
 
 class SearchViewModel : ViewModel() {
+    /** True while the next batch of YouTube results is loading. */
+    var loadingMore by mutableStateOf(false)
+        private set
+
+    private var limit = BATCH
+
     var query by mutableStateOf("")
         private set
 
@@ -72,6 +78,7 @@ class SearchViewModel : ViewModel() {
     }
 
     fun onTabSelected(selected: SearchTab) {
+        limit = BATCH
         tab = selected
         debounceJob?.cancel()
         searchJob?.cancel()
@@ -85,6 +92,7 @@ class SearchViewModel : ViewModel() {
 
     fun startSearch(q: String) {
         query = q
+        limit = BATCH
         tab = SearchTab.ALL
         debounceJob?.cancel()
         submit()
@@ -100,16 +108,16 @@ class SearchViewModel : ViewModel() {
         val cacheKey = "${selectedTab.name}:${q.lowercase()}"
 
         cache[cacheKey]?.let {
-            state = SearchUiState.Ready(it)
+            state = SearchUiState.Ready(it, hasMoreFor(it))
             return
         }
 
         state = SearchUiState.Loading
         searchJob = viewModelScope.launch {
             try {
-                val items = loadResults(q, selectedTab)
+                val items = loadResults(q, selectedTab, limit)
                 cache[cacheKey] = items
-                if (seq == requestSeq) state = SearchUiState.Ready(items)
+                if (seq == requestSeq) state = SearchUiState.Ready(items, hasMoreFor(items))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SearchException) {
@@ -124,14 +132,45 @@ class SearchViewModel : ViewModel() {
         }
     }
 
+    /** Loads the next batch of YouTube results. The list keeps what is already shown if this fails. */
+    fun loadMore() {
+        val ready = state as? SearchUiState.Ready ?: return
+        if (!ready.hasMore || loadingMore) return
+        val q = query.trim()
+        val selectedTab = tab
+        val cacheKey = "${selectedTab.name}:${q.lowercase()}"
+        val seq = requestSeq
+        loadingMore = true
+        limit += BATCH
+        viewModelScope.launch {
+            try {
+                val items = loadResults(q, selectedTab, limit)
+                cache[cacheKey] = items
+                if (seq == requestSeq) state = SearchUiState.Ready(items, hasMoreFor(items))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                limit -= BATCH
+            } finally {
+                loadingMore = false
+            }
+        }
+    }
+
+    private fun hasMoreFor(items: List<VideoItem>): Boolean = items.count { isYoutube(it) } >= limit
+
+    private fun isYoutube(item: VideoItem): Boolean =
+        item.url.contains("youtube.com") || item.url.contains("youtu.be")
+
     private suspend fun loadResults(
         q: String,
-        source: SearchTab
+        source: SearchTab,
+        count: Int
     ): List<VideoItem> {
         return when (source) {
             SearchTab.ALL -> coroutineScope {
                 val youtube = async {
-                    safeSearch { YtDlpSearch.search(q, 8) }
+                    safeSearch { YtDlpSearch.search(q, count) }
                 }
                 val web = async {
                     safeSearch { WebSearch.search(q) }
@@ -142,7 +181,6 @@ class SearchViewModel : ViewModel() {
 
                 val merged = (ytItems + webItems)
                     .distinctBy { it.url }
-                    .take(18)
 
                 if (merged.isEmpty()) {
                     throw SearchException("لم تظهر نتائج. تحقق من الاتصال أو جرّب عبارة أخرى.")
@@ -150,7 +188,7 @@ class SearchViewModel : ViewModel() {
                 merged
             }
 
-            SearchTab.SONGS, SearchTab.VIDEOS -> YtDlpSearch.search(q, 8)
+            SearchTab.SONGS, SearchTab.VIDEOS -> YtDlpSearch.search(q, count)
             SearchTab.WEB -> WebSearch.search(q)
             SearchTab.TIKTOK -> WebSearch.search(q, "tiktok")
             SearchTab.FACEBOOK -> WebSearch.search(q, "facebook")
@@ -177,6 +215,8 @@ class SearchViewModel : ViewModel() {
     }
 
     companion object {
+        /** Results per batch. Another batch loads when the user reaches the end of the list. */
+        const val BATCH = 6
         private val SONG_HINTS = listOf(
             "official audio", "audio", "lyrics", "lyric", "karaoke", "song", "music",
             "كلمات", "أغنية", "اغنية", "أغاني", "اغاني", "كاريوكي", "موسيقى"

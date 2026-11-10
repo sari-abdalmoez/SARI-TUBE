@@ -121,7 +121,7 @@ object MediaFormats {
         val result = ArrayList<MediaOption>()
         audioChoices.forEachIndexed { index, audio ->
             val bitrate = audio.abr.roundToInt()
-            val label = if (bitrate > 0) {
+            val label = if (index == 0) "سريع · ${audio.ext.uppercase(Locale.ROOT)}" else if (bitrate > 0) {
                 "$bitrate kbps · ${audio.ext.uppercase(Locale.ROOT)}"
             } else {
                 "صوت · ${audio.ext.uppercase(Locale.ROOT)}"
@@ -147,7 +147,7 @@ object MediaFormats {
                 audioNeeded -> best.size + (bestAudio?.size ?: 0L)
                 else -> best.size
             }
-            result.add(MediaOption("v$tier", "${tier}p", false, total, "b[height<=$tier][ext=mp4]/bv*[height<=$tier]+ba[ext=m4a]/bv*[height<=$tier]+ba/b[height<=$tier]"))
+            result.add(MediaOption("v$tier", videoLabel(tier), false, total, "b[height<=$tier][ext=mp4]/bv*[height<=$tier]+ba[ext=m4a]/bv*[height<=$tier]+ba/b[height<=$tier]"))
         }
 
         // Some sites (for example Instagram) give no height for their formats. Offer the best video anyway.
@@ -178,6 +178,13 @@ object MediaFormats {
                 "هذا المحتوى يتطلب تسجيل دخول أو خاص، ولا يمكن تنزيله"
             else -> "تعذّر قراءة الجودات لهذا الرابط. يمكنك تنزيله بأفضل جودة متاحة"
         }
+    }
+
+    private fun videoLabel(tier: Int): String = when (tier) {
+        360 -> "سريع (360p)"
+        480 -> "متوسطة (480p)"
+        720 -> "جودة عالية (720p)"
+        else -> "جودة عالية (${tier}p)"
     }
 
     private fun JSONObject.s(key: String): String = if (isNull(key)) "" else optString(key)
