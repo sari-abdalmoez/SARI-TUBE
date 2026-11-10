@@ -18,6 +18,7 @@ import com.sari.tube.engine.DownloadCancelledException
 import com.sari.tube.engine.DownloadControl
 import com.sari.tube.engine.DownloadEvent
 import com.sari.tube.engine.MediaResolver
+import com.sari.tube.engine.rememberRequest
 import com.sari.tube.engine.SmartDownloader
 import com.sari.tube.engine.UrlParser
 import com.sari.tube.engine.YtBlockedException
@@ -95,7 +96,7 @@ class DownloadService : Service() {
         val audioOnly = intent.getBooleanExtra(EXTRA_AUDIO, false)
 
         val id = nextId++
-        ActiveDownloads.rememberRequest(id, DownloadRequest(input, selector, audioOnly))
+        rememberRequest(id, DownloadRequest(input, selector, audioOnly))
         val control = DownloadControl()
         controls[id] = control
         ActiveDownloads.enqueue(id, input)
