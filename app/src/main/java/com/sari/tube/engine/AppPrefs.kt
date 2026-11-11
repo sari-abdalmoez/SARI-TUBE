@@ -6,6 +6,13 @@ import android.net.NetworkCapabilities
 
 /** User settings for downloads, stored in this app's private SharedPreferences. */
 object AppPrefs {
+    /** 0 = follow the phone, 1 = dark, 2 = light. */
+    fun themeMode(c: Context): Int = prefs(c).getInt("theme_mode", 0)
+
+    fun setThemeMode(c: Context, value: Int) {
+        prefs(c).edit().putInt("theme_mode", value).apply()
+    }
+
     /** How many times the clipboard reminder was shown for this link. The reminder stops after two. */
     fun clipboardReminders(c: Context, url: String): Int =
         c.getSharedPreferences("sari_tube_prefs", Context.MODE_PRIVATE).getInt("clip_" + url.hashCode(), 0)

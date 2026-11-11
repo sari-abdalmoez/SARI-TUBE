@@ -108,9 +108,6 @@ object YtDlpDownloader {
             addOption("--write-thumbnail")
             addOption("--convert-thumbnails", "jpg")
             if (embedCover) addOption("--embed-thumbnail")
-            // Captions are saved as .vtt files when the video has them. No lyrics are invented.
-            addOption("--write-subs")
-            addOption("--sub-langs", "ar.*,en.*")
             addOption("--no-playlist")
             addOption("--no-mtime")
             addOption("--continue")
@@ -146,6 +143,20 @@ object YtDlpDownloader {
 
         if (control.isCancelled) throw DownloadCancelledException()
         return findOutput(outDir, id)
+    }
+
+    /** Captions only, run after the media is saved. Files land next to the temp media and are saved from there. */
+    fun fetchSubtitles(url: String, outDir: File) {
+        outDir.mkdirs()
+        val id = idFor(url)
+        val request = YoutubeDLRequest(url).apply {
+            addOption("--skip-download")
+            addOption("--write-subs")
+            addOption("--sub-langs", "ar.*,en.*")
+            addOption("--no-playlist")
+            addOption("-o", File(outDir, "$id.%(ext)s").absolutePath)
+        }
+        YtDlpLock.shared { YoutubeDL.getInstance().execute(request, "subs-$id") }
     }
 
     /** Turns raw yt-dlp output into a message the user can act on, and decides whether to fall back. */

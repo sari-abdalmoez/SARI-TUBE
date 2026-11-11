@@ -18,7 +18,6 @@ import com.sari.tube.engine.DownloadCancelledException
 import com.sari.tube.engine.DownloadControl
 import com.sari.tube.engine.DownloadEvent
 import com.sari.tube.engine.MediaResolver
-import com.sari.tube.engine.rememberRequest
 import com.sari.tube.engine.SmartDownloader
 import com.sari.tube.engine.UrlParser
 import com.sari.tube.engine.YtBlockedException
@@ -96,7 +95,7 @@ class DownloadService : Service() {
         val audioOnly = intent.getBooleanExtra(EXTRA_AUDIO, false)
 
         val id = nextId++
-        rememberRequest(id, DownloadRequest(input, selector, audioOnly))
+        ActiveDownloads.rememberRequest(id, DownloadRequest(input, selector, audioOnly))
         val control = DownloadControl()
         controls[id] = control
         ActiveDownloads.enqueue(id, input)
@@ -216,8 +215,17 @@ class DownloadService : Service() {
         )
         if (!YtDlpEngine.awaitReady()) throw YtDlpException("محرك yt-dlp لم يجهز بعد")
         // The cover of the item is shown in the download card instead of a placeholder.
-        runCatching { MediaFormats.fetch(url) }
-        MediaFormats.info(url)?.thumbnail?.let { ActiveDownloads.setThumbnail(id, it) }
+        // Use the cached analysis if the link was already analyzed. Otherwise analyze in the background,
+        // so the download itself never waits for the analysis.
+        val cached = MediaFormats.info(url)
+        if (cached != null) {
+            cached.thumbnail?.let { ActiveDownloads.setThumbnail(id, it) }
+        } else {
+            scope.launch {
+                runCatching { MediaFormats.fetch(url) }
+                MediaFormats.info(url)?.thumbnail?.let { ActiveDownloads.setThumbnail(id, it) }
+            }
+        }
 
         var last = 0L
         val file = YtDlpDownloader.download(
@@ -244,8 +252,12 @@ class DownloadService : Service() {
             Regex("^${Regex.escape(YtDlpDownloader.idFor(url))}_"), ""
         )
         finishFile(id, file, displayName, YtDlpDownloader.mimeFor(file.name), findCover(url))
-        saveSubtitles(url, displayName)
-        removeYtdlLeftovers(url)
+        // Captions are optional. They are fetched after the media is already saved, so they never delay it.
+        scope.launch {
+            runCatching { YtDlpDownloader.fetchSubtitles(url, File(cacheDir, "ytdl")) }
+            saveSubtitles(url, displayName)
+            removeYtdlLeftovers(url)
+        }
     }
 
     private suspend fun downloadDirect(id: Int, input: String, control: DownloadControl) {

@@ -1,5 +1,9 @@
 package com.sari.tube.ui
 
+import androidx.compose.material3.lightColorScheme
+
+import androidx.compose.foundation.isSystemInDarkTheme
+
 import com.sari.tube.engine.LinkInfo
 
 import androidx.compose.ui.platform.LocalContext
@@ -101,6 +105,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppPrefs.applyRate(this)
+        ThemeMode.load(this)
         setContent {
             SariTheme {
                 var tab by rememberSaveable { mutableStateOf(TAB_DOWNLOAD) }
@@ -199,8 +204,13 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun SariTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
+    val dark = when (ThemeMode.value) {
+        1 -> true
+        2 -> false
+        else -> isSystemInDarkTheme()
+    }
+    val scheme = if (dark) {
+        darkColorScheme(
             primary = Color(0xFFFFC53D),
             onPrimary = Color(0xFF141414),
             background = Color(0xFF0E0E10),
@@ -209,9 +219,20 @@ fun SariTheme(content: @Composable () -> Unit) {
             onSurface = Color(0xFFEDEDED),
             onSurfaceVariant = Color(0xFF9A9AA5),
             outline = Color(0xFF2E2E36)
-        ),
-        content = content
-    )
+        )
+    } else {
+        lightColorScheme(
+            primary = Color(0xFFB7791F),
+            onPrimary = Color.White,
+            background = Color(0xFFF6F6F8),
+            surface = Color(0xFFFFFFFF),
+            onBackground = Color(0xFF15151A),
+            onSurface = Color(0xFF15151A),
+            onSurfaceVariant = Color(0xFF5E5E68),
+            outline = Color(0xFFD0D0D8)
+        )
+    }
+    MaterialTheme(colorScheme = scheme, content = content)
 }
 
 @Composable

@@ -63,6 +63,7 @@ fun ToolsScreen(onOpenDownloadSettings: () -> Unit) {
     var showAbout by remember { mutableStateOf(false) }
 
     val cards = listOf(
+        ToolCard("المظهر", ThemeMode.label(), Icons.Filled.Settings) { ThemeMode.next(ctx) },
         ToolCard(
             "إعدادات التنزيل",
             "عدد المهام والسرعة والشبكة",
