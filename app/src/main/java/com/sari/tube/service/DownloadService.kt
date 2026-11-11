@@ -96,7 +96,7 @@ class DownloadService : Service() {
         val audioOnly = intent.getBooleanExtra(EXTRA_AUDIO, false)
 
         val id = nextId++
-        ActiveDownloads.rememberRequest(id, DownloadRequest(input, selector, audioOnly))
+        rememberRequest(id, DownloadRequest(input, selector, audioOnly))
         val control = DownloadControl()
         controls[id] = control
         ActiveDownloads.enqueue(id, input)
