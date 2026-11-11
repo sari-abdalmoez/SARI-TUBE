@@ -2,6 +2,8 @@ package com.sari.tube.ui
 
 import android.content.Context
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import com.sari.tube.engine.AppPrefs
 
 /** Theme choice shared by the whole app. Changing it recomposes every screen at once. */
