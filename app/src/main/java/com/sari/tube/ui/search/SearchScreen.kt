@@ -11,6 +11,11 @@ import androidx.media3.ui.PlayerView
 import androidx.media3.exoplayer.ExoPlayer
 
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import com.sari.tube.engine.PlaybackResolver
+import com.sari.tube.engine.PlaybackStream
+import kotlinx.coroutines.CancellationException
 
 import androidx.compose.ui.viewinterop.AndroidView
 
@@ -79,12 +84,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.youtubedl_android.YoutubeDLRequest
-import com.sari.tube.engine.YtDlpEngine
-import com.sari.tube.engine.YtDlpLock
 import java.util.Locale
 
 @Composable
@@ -99,14 +98,15 @@ fun SearchScreen(
     val context = LocalContext.current
 
     var playItem by remember { mutableStateOf<VideoItem?>(null) }
-    var streamUrl by remember { mutableStateOf<String?>(null) }
+    var playbackStream by remember { mutableStateOf<PlaybackStream?>(null) }
+    var retryNonce by remember { mutableStateOf(0) }
     var playbackError by remember { mutableStateOf<String?>(null) }
     var resolving by remember { mutableStateOf(false) }
 
     // Back closes the open player first, and only then leaves the search screen.
     BackHandler(enabled = playItem != null) {
         playItem = null
-        streamUrl = null
+        playbackStream = null
     }
 
     val listState = rememberLazyListState()
@@ -116,57 +116,52 @@ fun SearchScreen(
             .collect { last -> if (readyCount > 0 && last >= readyCount - 2) vm.loadMore() }
     }
 
-    LaunchedEffect(playItem) {
-        val selected = playItem ?: return@LaunchedEffect
-        streamUrl = null
+    LaunchedEffect(playItem, retryNonce) {
+        val selected = playItem
+        if (selected == null) {
+            playbackStream = null
+            resolving = false
+            return@LaunchedEffect
+        }
+
+        playbackStream = null
         playbackError = null
         resolving = true
-
         try {
-            if (!YtDlpEngine.awaitReady()) {
-                error("محرك التشغيل لم يجهز")
-            }
-
-            val output = withContext(Dispatchers.IO) {
-                val request = YoutubeDLRequest(selected.url).apply {
-                    addOption("-g")
-                    addOption("-f", "best[height<=720]/best")
-                    addOption("--no-playlist")
-                    addOption("--no-warnings")
-                }
-
-                YtDlpLock.shared {
-                    YoutubeDL.getInstance().execute(
-                        request,
-                        "inline-play-${System.nanoTime()}"
-                    ).out
-                }
-            }
-
-            streamUrl = output.lineSequence()
-                .map { it.trim() }
-                .firstOrNull {
-                    it.startsWith("https://") || it.startsWith("http://")
-                } ?: error("لم يتم العثور على رابط تشغيل مباشر")
+            playbackStream = PlaybackResolver.resolve(selected.url)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            playbackError = "تعذر التشغيل: ${e.message.orEmpty().take(120)}"
+            playbackError = "تعذر التشغيل: ${e.message.orEmpty().take(150)}"
         } finally {
             resolving = false
         }
     }
 
-    val player: ExoPlayer? = remember(streamUrl) {
-        streamUrl?.let { url ->
-            ExoPlayer.Builder(context).build().apply {
-                setMediaItem(MediaItem.fromUri(url))
-                prepare()
-                playWhenReady = true
-            }
-        }
+    val player: ExoPlayer? = remember(playbackStream, context) {
+        playbackStream?.let { PlaybackResolver.createPlayer(context, it) }
     }
 
     DisposableEffect(player) {
-        onDispose { player?.release() }
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                val code = error.errorCodeName
+                playbackError = when {
+                    code.contains("NETWORK", true) || code.contains("HTTP", true) ->
+                        "تعذر جلب الفيديو من المصدر. تحقق من الاتصال أو صلاحية الرابط."
+                    code.contains("PARSING", true) || code.contains("UNSUPPORTED", true) ->
+                        "صيغة الفيديو أو البث غير مدعومة."
+                    code.contains("DECODING", true) ->
+                        "تعذر فك ترميز الفيديو على الجهاز."
+                    else -> "حدث خطأ أثناء تشغيل الفيديو ($code). أعد المحاولة."
+                }
+            }
+        }
+        player?.addListener(listener)
+        onDispose {
+            player?.removeListener(listener)
+            player?.release()
+        }
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -216,18 +211,18 @@ fun SearchScreen(
                     Text(
                         playItem?.title.orEmpty(),
                         modifier = Modifier.weight(1f),
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onBackground,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     IconButton(onClick = {
                         playItem = null
-                        streamUrl = null
+                        playbackStream = null
                     }) {
                         Icon(
                             Icons.Filled.ArrowBack,
                             contentDescription = "إغلاق المشغل",
-                            tint = Color.White
+                            tint = MaterialTheme.colorScheme.onBackground
                         )
                     }
                 }
@@ -237,28 +232,42 @@ fun SearchScreen(
                         Modifier.fillMaxWidth().weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = Color.White)
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     }
 
-                    playbackError != null -> Box(
-                        Modifier.fillMaxWidth().weight(1f),
-                        contentAlignment = Alignment.Center
+                    playbackError != null -> Column(
+                        Modifier.fillMaxWidth().weight(1f).padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
                         Text(
                             playbackError.orEmpty(),
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onBackground,
                             textAlign = TextAlign.Center
                         )
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = {
+                            playbackError = null
+                            playbackStream = null
+                            retryNonce++
+                        }) {
+                            Text("إعادة المحاولة")
+                        }
                     }
 
                     player != null -> AndroidView(
                         factory = { viewContext ->
                             PlayerView(viewContext).apply {
                                 useController = true
+                                controllerAutoShow = true
+                                controllerHideOnTouch = true
+                                setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                                 this.player = player
                             }
                         },
-                        update = { it.player = player },
+                        update = {
+                            if (it.player !== player) it.player = player
+                        },
                         modifier = Modifier.fillMaxWidth().weight(1f)
                     )
 
