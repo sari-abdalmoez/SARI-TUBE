@@ -4,23 +4,31 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.media.AudioManager
 import android.view.Window
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brightness6
@@ -28,10 +36,12 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -50,11 +60,12 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
@@ -82,31 +93,39 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private val Accent = Color(0xFFFFB300)
-private val Scrim = Color(0x66000000)
+private val Dim = Color(0x66000000)
 private val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 private const val CONTROLS_HIDE_MS = 3_500L
 
-/**
- * Observable state of one player. Compose reads these fields directly, so the UI updates
- * as soon as the player changes.
- */
+/** Observable state of one player. Compose reads these fields directly and updates as they change. */
 @Stable
-private class PlayerUi(val player: ExoPlayer) {
+private class PlayerUi(val player: ExoPlayer, private val audio: AudioManager?) {
     var isPlaying by mutableStateOf(player.isPlaying)
     var buffering by mutableStateOf(player.playbackState == Player.STATE_BUFFERING)
     var position by mutableLongStateOf(0L)
     var duration by mutableLongStateOf(0L)
     var tracks by mutableStateOf(player.currentTracks)
     var speed by mutableFloatStateOf(player.playbackParameters.speed)
-    var volume by mutableFloatStateOf(player.volume)
+    var volume by mutableFloatStateOf(readDeviceVolume())
     var brightness by mutableFloatStateOf(-1f) // -1 means the system brightness
+    var fill by mutableStateOf(true)           // true: crop the picture to fill the screen (the default)
+    var locked by mutableStateOf(false)
     var controlsVisible by mutableStateOf(true)
     var tick by mutableLongStateOf(0L)
     var dragging by mutableStateOf(false)
     var dragValue by mutableFloatStateOf(0f)
+
+    private fun readDeviceVolume(): Float {
+        val a = audio ?: return 0.5f
+        val max = a.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        return a.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max
+    }
 
     fun touch() {
         controlsVisible = true
@@ -122,13 +141,18 @@ private class PlayerUi(val player: ExoPlayer) {
         }
     }
 
-    fun applySpeed(value: Float) {
+    fun setSpeed(value: Float) {
         player.setPlaybackSpeed(value)
         speed = value
     }
 
-    fun applyVolume(value: Float) {
-        player.volume = value
+    /** Changes the phone's music volume, which is the volume the user hears. */
+    fun setVolume(value: Float) {
+        val a = audio
+        if (a != null) {
+            val max = a.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+            a.setStreamVolume(AudioManager.STREAM_MUSIC, (value * max).roundToInt().coerceIn(0, max), 0)
+        }
         volume = value
     }
 }
@@ -137,11 +161,9 @@ private class PlayerUi(val player: ExoPlayer) {
 private class TrackOption(val label: String, val selected: Boolean, val apply: (ExoPlayer) -> Unit)
 
 /**
- * Video player with its own controls: play/pause, 10-second jumps, a seek bar, speed, quality,
- * subtitles and audio tracks (when the source provides them), volume, brightness, and fullscreen.
- *
- * Controls hide after a few seconds of playback and reappear on tap. [errorMessage] replaces the
- * picture with a readable message and a retry button.
+ * Full-screen video player, in landscape, in the style of the reference design:
+ * volume on the left, brightness and lock on the right, a thin progress bar, and the transport
+ * controls at the bottom. Controls hide after a few seconds while playing and come back on tap.
  */
 @Composable
 fun VideoPlayer(
@@ -155,13 +177,12 @@ fun VideoPlayer(
     errorMessage: String? = null,
     onRetry: (() -> Unit)? = null
 ) {
-    val ui = remember(player) { PlayerUi(player) }
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
+    val audio = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
+    val ui = remember(player) { PlayerUi(player, audio) }
     val lifecycleOwner = LocalLifecycleOwner.current
-    var fullscreen by rememberSaveable { mutableStateOf(false) }
 
-    // Listens for changes the UI must show.
     DisposableEffect(ui) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -194,7 +215,7 @@ fun VideoPlayer(
         }
     }
 
-    // Controls hide while playing and stay visible when paused, on error, or after a tap.
+    // Controls hide while playing and stay visible when paused, while dragging, or after a tap.
     LaunchedEffect(ui.tick, ui.isPlaying, ui.dragging) {
         ui.controlsVisible = true
         if (ui.isPlaying && !ui.dragging) {
@@ -203,7 +224,7 @@ fun VideoPlayer(
         }
     }
 
-    // The player pauses when the app goes to the background, so audio does not keep playing.
+    // Pause when the app goes to the background, so audio does not keep playing unseen.
     DisposableEffect(lifecycleOwner, ui) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) ui.player.pause()
@@ -212,58 +233,25 @@ fun VideoPlayer(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Restores the system brightness when the player leaves the screen.
-    DisposableEffect(activity) {
-        onDispose {
-            activity?.window?.let { w ->
-                w.attributes = w.attributes.also { it.screenBrightness = -1f }
-            }
-        }
-    }
-
-    Box(modifier.background(Color.Black)) {
-        if (fullscreen) {
-            // The fullscreen dialog owns the surface while it is open. Showing two PlayerViews at once
-            // would take the video output away from one of them.
-            Box(Modifier.fillMaxSize().background(Color.Black))
-        } else {
+    // A dialog covers the whole screen, status bar included, so the player is truly full screen.
+    Dialog(
+        onDismissRequest = onBack,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        FullscreenEffects(activity, dialogWindow)
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
             PlayerSurface(
                 ui = ui,
                 title = title,
-                isFullscreen = false,
                 onBack = onBack,
-                onToggleFullscreen = { fullscreen = true },
                 qualityLabels = qualityLabels,
                 selectedQuality = selectedQuality,
                 onQualitySelected = onQualitySelected,
                 errorMessage = errorMessage,
-                onRetry = onRetry
+                onRetry = onRetry,
+                window = dialogWindow
             )
-        }
-    }
-
-    if (fullscreen) {
-        Dialog(
-            onDismissRequest = { fullscreen = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            val view = LocalView.current
-            val dialogWindow = (view.parent as? DialogWindowProvider)?.window
-            FullscreenEffects(activity, dialogWindow)
-            Box(Modifier.fillMaxSize().background(Color.Black)) {
-                PlayerSurface(
-                    ui = ui,
-                    title = title,
-                    isFullscreen = true,
-                    onBack = { fullscreen = false },
-                    onToggleFullscreen = { fullscreen = false },
-                    qualityLabels = qualityLabels,
-                    selectedQuality = selectedQuality,
-                    onQualitySelected = onQualitySelected,
-                    errorMessage = errorMessage,
-                    onRetry = onRetry
-                )
-            }
         }
     }
 }
@@ -272,20 +260,18 @@ fun VideoPlayer(
 private fun PlayerSurface(
     ui: PlayerUi,
     title: String,
-    isFullscreen: Boolean,
     onBack: () -> Unit,
-    onToggleFullscreen: () -> Unit,
     qualityLabels: List<String>,
     selectedQuality: Int,
     onQualitySelected: (Int) -> Unit,
     errorMessage: String?,
-    onRetry: (() -> Unit)?
+    onRetry: (() -> Unit)?,
+    window: Window?
 ) {
-    val view = LocalView.current
-    val activity = LocalContext.current.findActivity()
-    // In a dialog the window is the dialog's own; inline it is the activity's window.
-    val window: Window? = (view.parent as? DialogWindowProvider)?.window ?: activity?.window
     var showSettings by remember { mutableStateOf(false) }
+    val resize = if (ui.fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+    val keepOn = ui.isPlaying
+    val clock = rememberClock()
 
     LaunchedEffect(window, ui.brightness) {
         window?.let { w ->
@@ -293,25 +279,23 @@ private fun PlayerSurface(
         }
     }
 
-    val showControls = ui.controlsVisible || errorMessage != null
-
     Box(Modifier.fillMaxSize()) {
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     player = ui.player
                 }
             },
             update = { v ->
                 if (v.player !== ui.player) v.player = ui.player
-                v.keepScreenOn = ui.isPlaying
+                v.resizeMode = resize
+                v.keepScreenOn = keepOn
             },
             modifier = Modifier.fillMaxSize()
         )
 
-        // Transparent layer that catches taps on the picture. It sits above the video and below the controls.
+        // Transparent layer that catches taps on the picture, under the controls.
         Box(
             Modifier
                 .fillMaxSize()
@@ -331,148 +315,73 @@ private fun PlayerSurface(
             )
         }
 
-        if (showControls) {
-            Box(Modifier.fillMaxSize().background(if (errorMessage == null) Scrim else Color.Black.copy(alpha = 0.85f))) {
-                // Top bar: back, title, settings and fullscreen.
+        when {
+            errorMessage != null -> ErrorOverlay(errorMessage, onBack, onRetry)
+
+            ui.locked -> if (ui.controlsVisible) {
+                // Locked: only the lock button stays, and tapping it unlocks.
+                IconButton(
+                    onClick = {
+                        ui.locked = false
+                        ui.touch()
+                    },
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp)
+                ) {
+                    Icon(Icons.Filled.Lock, contentDescription = "إلغاء القفل", tint = Color.White)
+                }
+            }
+
+            ui.controlsVisible -> Box(Modifier.fillMaxSize().background(Dim)) {
+                TopBar(title, clock, ui, onBack, onOpenSettings = {
+                    showSettings = true
+                    ui.touch()
+                })
+
+                // Left: device volume.
+                Column(
+                    Modifier.align(Alignment.CenterStart).padding(start = 22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    VerticalSlider(
+                        value = ui.volume,
+                        onChange = {
+                            ui.setVolume(it)
+                            ui.touch()
+                        }
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Icon(Icons.Filled.VolumeUp, contentDescription = "الصوت", tint = Color.White)
+                }
+
+                // Right: brightness, and the lock button below it.
                 Row(
-                    Modifier
-                        .align(Alignment.TopStart)
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    Modifier.align(Alignment.CenterEnd).padding(end = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع", tint = Color.White)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        VerticalSlider(
+                            value = if (ui.brightness < 0f) 0.5f else ui.brightness,
+                            onChange = {
+                                ui.brightness = it.coerceIn(0.01f, 1f)
+                                ui.touch()
+                            }
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Icon(Icons.Filled.Brightness6, contentDescription = "السطوع", tint = Color.White)
                     }
-                    Text(
-                        title,
-                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Spacer(Modifier.width(18.dp))
                     IconButton(onClick = {
-                        showSettings = true
+                        ui.locked = true
                         ui.touch()
                     }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "الإعدادات", tint = Color.White)
-                    }
-                    IconButton(onClick = onToggleFullscreen) {
-                        Icon(
-                            if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                            contentDescription = if (isFullscreen) "الخروج من ملء الشاشة" else "ملء الشاشة",
-                            tint = Color.White
-                        )
+                        Icon(Icons.Filled.LockOpen, contentDescription = "قفل الشاشة", tint = Color.White)
                     }
                 }
 
-                if (errorMessage != null) {
-                    Column(
-                        Modifier.align(Alignment.Center).padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            errorMessage,
-                            color = Color.White,
-                            textAlign = TextAlign.Center,
-                            fontSize = 15.sp
-                        )
-                        if (onRetry != null) {
-                            Spacer(Modifier.height(16.dp))
-                            Button(onClick = onRetry) { Text("إعادة المحاولة") }
-                        }
-                    }
-                } else {
-                    // Center: 10-second jumps and play/pause.
-                    Row(
-                        Modifier.align(Alignment.Center),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(28.dp)
-                    ) {
-                        IconButton(
-                            onClick = {
-                                ui.player.seekBack()
-                                ui.touch()
-                            },
-                            modifier = Modifier.size(56.dp)
-                        ) {
-                            Icon(
-                                Icons.Filled.Replay10,
-                                contentDescription = "تأخير 10 ثوانٍ",
-                                tint = Color.White,
-                                modifier = Modifier.size(40.dp)
-                            )
-                        }
-                        IconButton(
-                            onClick = {
-                                ui.togglePlay()
-                                ui.touch()
-                            },
-                            modifier = Modifier.size(72.dp)
-                        ) {
-                            Icon(
-                                if (ui.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                contentDescription = if (ui.isPlaying) "إيقاف مؤقت" else "تشغيل",
-                                tint = Color.White,
-                                modifier = Modifier.size(56.dp)
-                            )
-                        }
-                        IconButton(
-                            onClick = {
-                                ui.player.seekForward()
-                                ui.touch()
-                            },
-                            modifier = Modifier.size(56.dp)
-                        ) {
-                            Icon(
-                                Icons.Filled.Forward10,
-                                contentDescription = "تقديم 10 ثوانٍ",
-                                tint = Color.White,
-                                modifier = Modifier.size(40.dp)
-                            )
-                        }
-                    }
-
-                    // Bottom: seek bar and times.
-                    Column(
-                        Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        val maxValue = ui.duration.coerceAtLeast(1L).toFloat()
-                        val shown = if (ui.dragging) ui.dragValue else ui.position.toFloat()
-                        Slider(
-                            value = shown.coerceIn(0f, maxValue),
-                            onValueChange = {
-                                ui.dragging = true
-                                ui.dragValue = it
-                            },
-                            onValueChangeFinished = {
-                                ui.player.seekTo(ui.dragValue.toLong())
-                                ui.dragging = false
-                                ui.touch()
-                            },
-                            valueRange = 0f..maxValue,
-                            enabled = ui.duration > 0,
-                            colors = SliderDefaults.colors(
-                                thumbColor = Accent,
-                                activeTrackColor = Accent,
-                                inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                            )
-                        )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(formatTime(shown.toLong()), color = Color.White, fontSize = 12.sp)
-                            Text(
-                                if (ui.duration > 0) formatTime(ui.duration) else "--:--",
-                                color = Color.White,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-                }
+                BottomBar(ui, qualityLabels, selectedQuality, onOpenSettings = {
+                    showSettings = true
+                    ui.touch()
+                })
             }
         }
     }
@@ -484,6 +393,219 @@ private fun PlayerSurface(
             selectedQuality = selectedQuality,
             onQualitySelected = onQualitySelected,
             onDismiss = { showSettings = false }
+        )
+    }
+}
+
+@Composable
+private fun BoxScope.TopBar(
+    title: String,
+    clock: String,
+    ui: PlayerUi,
+    onBack: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    Row(
+        Modifier
+            .align(Alignment.TopStart)
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع", tint = Color.White)
+        }
+        Text(
+            title,
+            modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 15.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(clock, color = Color.White, fontSize = 14.sp)
+        IconButton(onClick = {
+            ui.fill = !ui.fill
+            ui.touch()
+        }) {
+            Icon(
+                if (ui.fill) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                contentDescription = if (ui.fill) "إظهار كامل الصورة" else "ملء الشاشة",
+                tint = Color.White
+            )
+        }
+        IconButton(onClick = onOpenSettings) {
+            Icon(Icons.Filled.MoreHoriz, contentDescription = "الإعدادات", tint = Color.White)
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.BottomBar(
+    ui: PlayerUi,
+    qualityLabels: List<String>,
+    selectedQuality: Int,
+    onOpenSettings: () -> Unit
+) {
+    val maxValue = ui.duration.coerceAtLeast(1L).toFloat()
+    val shown = if (ui.dragging) ui.dragValue else ui.position.toFloat()
+
+    Column(
+        Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 6.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                "${formatTime(shown.toLong())} / ${if (ui.duration > 0) formatTime(ui.duration) else "--:--"}",
+                color = Color.White,
+                fontSize = 12.sp
+            )
+        }
+        Slider(
+            value = shown.coerceIn(0f, maxValue),
+            onValueChange = {
+                ui.dragging = true
+                ui.dragValue = it
+            },
+            onValueChangeFinished = {
+                ui.player.seekTo(ui.dragValue.toLong())
+                ui.dragging = false
+                ui.touch()
+            },
+            valueRange = 0f..maxValue,
+            enabled = ui.duration > 0,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color.White,
+                inactiveTrackColor = Color.White.copy(alpha = 0.35f)
+            )
+        )
+
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Left: quality, subtitles and speed. Each one opens the settings list.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                qualityLabels.getOrNull(selectedQuality)?.let { label ->
+                    Text(
+                        label,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(onClick = onOpenSettings)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Filled.MoreHoriz, contentDescription = "الترجمة والصوت", tint = Color.White)
+                }
+                Text(
+                    speedLabel(ui.speed),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(onClick = onOpenSettings)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    color = Color.White,
+                    fontSize = 13.sp
+                )
+            }
+
+            // Right: 10-second jumps and play/pause.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = {
+                    ui.player.seekBack()
+                    ui.touch()
+                }) {
+                    Icon(Icons.Filled.Replay10, contentDescription = "تأخير 10 ثوانٍ", tint = Color.White, modifier = Modifier.size(34.dp))
+                }
+                IconButton(onClick = {
+                    ui.player.seekForward()
+                    ui.touch()
+                }) {
+                    Icon(Icons.Filled.Forward10, contentDescription = "تقديم 10 ثوانٍ", tint = Color.White, modifier = Modifier.size(34.dp))
+                }
+                IconButton(onClick = {
+                    ui.togglePlay()
+                    ui.touch()
+                }) {
+                    Icon(
+                        if (ui.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (ui.isPlaying) "إيقاف مؤقت" else "تشغيل",
+                        tint = Color.White,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorOverlay(message: String, onBack: () -> Unit, onRetry: (() -> Unit)?) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f))) {
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(6.dp)
+        ) {
+            Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع", tint = Color.White)
+        }
+        Column(
+            Modifier.align(Alignment.Center).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(message, color = Color.White, textAlign = TextAlign.Center, fontSize = 15.sp)
+            if (onRetry != null) {
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = onRetry) { Text("إعادة المحاولة") }
+            }
+        }
+    }
+}
+
+/** A vertical slider drawn by hand: Material has no vertical slider. Works with taps and drags. */
+@Composable
+private fun VerticalSlider(value: Float, onChange: (Float) -> Unit) {
+    val v = value.coerceIn(0f, 1f)
+    Box(
+        Modifier
+            .width(32.dp)
+            .height(170.dp)
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    onChange((1f - offset.y / size.height).coerceIn(0f, 1f))
+                }
+            }
+            .pointerInput(Unit) {
+                detectVerticalDragGestures { change, _ ->
+                    change.consume()
+                    onChange((1f - change.position.y / size.height).coerceIn(0f, 1f))
+                }
+            }
+    ) {
+        Box(
+            Modifier
+                .align(Alignment.Center)
+                .width(3.dp)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color.White.copy(alpha = 0.35f))
+        )
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .width(3.dp)
+                .fillMaxHeight(v)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color.White)
         )
     }
 }
@@ -522,10 +644,9 @@ private fun SettingsDialog(
 
                 SectionTitle("السرعة")
                 SPEEDS.forEach { s ->
-                    OptionRow(
-                        label = if (s % 1f == 0f) "${s.toInt()}x" else "${s}x",
-                        selected = kotlin.math.abs(ui.speed - s) < 0.01f
-                    ) { ui.applySpeed(s) }
+                    OptionRow(speedLabel(s), selected = kotlin.math.abs(ui.speed - s) < 0.01f) {
+                        ui.setSpeed(s)
+                    }
                 }
 
                 if (subtitles.isNotEmpty()) {
@@ -546,30 +667,6 @@ private fun SettingsDialog(
                             ui.touch()
                         }
                     }
-                }
-
-                SectionTitle("مستوى الصوت")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.VolumeUp, contentDescription = null, tint = Color.White)
-                    Slider(
-                        value = ui.volume,
-                        onValueChange = { ui.applyVolume(it) },
-                        valueRange = 0f..1f,
-                        modifier = Modifier.weight(1f).padding(start = 8.dp),
-                        colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent)
-                    )
-                }
-
-                SectionTitle("السطوع")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Brightness6, contentDescription = null, tint = Color.White)
-                    Slider(
-                        value = (if (ui.brightness < 0f) 0.5f else ui.brightness).coerceIn(0.01f, 1f),
-                        onValueChange = { ui.brightness = it.coerceAtLeast(0.01f) },
-                        valueRange = 0.01f..1f,
-                        modifier = Modifier.weight(1f).padding(start = 8.dp),
-                        colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent)
-                    )
                 }
             }
         }
@@ -606,7 +703,7 @@ private fun OptionRow(label: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Hides the system bars and locks landscape while the player is fullscreen. Undone when it closes. */
+/** Hides the system bars and locks landscape while the player is open. Both are restored on close. */
 @Composable
 private fun FullscreenEffects(activity: Activity?, dialogWindow: Window?) {
     DisposableEffect(activity, dialogWindow) {
@@ -614,7 +711,7 @@ private fun FullscreenEffects(activity: Activity?, dialogWindow: Window?) {
         dialogWindow?.let { w ->
             WindowCompat.setDecorFitsSystemWindows(w, false)
             WindowInsetsControllerCompat(w, w.decorView).apply {
-                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BY_SWIPE
                 hide(WindowInsetsCompat.Type.systemBars())
             }
         }
@@ -627,6 +724,23 @@ private fun FullscreenEffects(activity: Activity?, dialogWindow: Window?) {
         }
     }
 }
+
+/** Current time, refreshed every 10 seconds. */
+@Composable
+private fun rememberClock(): String {
+    var now by remember { mutableStateOf(formatClock()) }
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            now = formatClock()
+            delay(10_000L)
+        }
+    }
+    return now
+}
+
+private fun formatClock(): String = SimpleDateFormat("HH:mm", Locale.US).format(Date())
+
+private fun speedLabel(s: Float): String = if (s % 1f == 0f) "${s.toInt()}x" else "${s}x"
 
 /** Builds the subtitle and audio lists from the tracks the source provides. Empty when there are none. */
 private fun buildTrackOptions(player: ExoPlayer, tracks: Tracks): Pair<List<TrackOption>, List<TrackOption>> {
@@ -657,12 +771,11 @@ private fun buildTrackOptions(player: ExoPlayer, tracks: Tracks): Pair<List<Trac
     }
 
     if (subtitles.isNotEmpty()) {
-        val none = subtitles.none { it.selected }
         subtitles.add(
             0,
             TrackOption(
                 label = "بدون ترجمة",
-                selected = none,
+                selected = subtitles.none { it.selected },
                 apply = { p ->
                     p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
                         .clearOverridesOfType(C.TRACK_TYPE_TEXT)

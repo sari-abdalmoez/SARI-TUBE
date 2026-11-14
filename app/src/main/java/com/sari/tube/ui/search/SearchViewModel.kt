@@ -8,6 +8,12 @@ import androidx.lifecycle.viewModelScope
 import com.sari.tube.engine.SearchException
 import com.sari.tube.engine.VideoItem
 import com.sari.tube.engine.WebSearch
+import com.sari.tube.engine.MetaKind
+import com.sari.tube.engine.MetaService
+import com.sari.tube.engine.UnifiedMediaItem
+import androidx.lifecycle.SavedStateHandle
+import org.json.JSONArray
+import org.json.JSONObject
 import com.sari.tube.engine.YtDlpSearch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -37,18 +43,52 @@ sealed interface SearchUiState {
     data class Failed(val message: String) : SearchUiState
 }
 
-class SearchViewModel : ViewModel() {
+/**
+ * Search state. It is saved in [saved] so it survives the system recreating the activity
+ * (common when the app is in the background). It is cleared only when the app is closed.
+ */
+class SearchViewModel(private val saved: SavedStateHandle) : ViewModel() {
     /** True while the next batch of YouTube results is loading. */
     var loadingMore by mutableStateOf(false)
         private set
 
     private var limit = BATCH
 
-    var query by mutableStateOf("")
+    var query by mutableStateOf(saved.get<String>(KEY_QUERY).orEmpty())
         private set
 
-    var tab by mutableStateOf(SearchTab.ALL)
+    var tab by mutableStateOf(
+        saved.get<String>(KEY_TAB)?.let { name -> runCatching { SearchTab.valueOf(name) }.getOrNull() }
+            ?: SearchTab.ALL
+    )
         private set
+
+    /** Film or series whose details page is open. */
+    var openMedia by mutableStateOf(SavedItems.media(saved.get<String>(KEY_MEDIA)))
+        private set
+
+    /** Query whose web results are shown while the user picks a page to watch. */
+    var watchQuery by mutableStateOf(saved.get<String>(KEY_WATCH))
+        private set
+
+    /** Result the player is showing. */
+    var playItem by mutableStateOf(SavedItems.video(saved.get<String>(KEY_PLAY)))
+        private set
+
+    fun openMediaItem(item: UnifiedMediaItem?) {
+        openMedia = item
+        saved[KEY_MEDIA] = item?.let { SavedItems.mediaJson(it) }
+    }
+
+    fun setWatch(value: String?) {
+        watchQuery = value
+        saved[KEY_WATCH] = value
+    }
+
+    fun playVideo(item: VideoItem?) {
+        playItem = item
+        saved[KEY_PLAY] = item?.let { SavedItems.videoJson(it) }
+    }
 
     var state by mutableStateOf<SearchUiState>(SearchUiState.Idle)
         private set
@@ -65,6 +105,7 @@ class SearchViewModel : ViewModel() {
 
     fun onQueryChange(value: String) {
         query = value
+        saved[KEY_QUERY] = value
         debounceJob?.cancel()
 
         if (value.isBlank() || !tab.searchable) {
@@ -82,6 +123,7 @@ class SearchViewModel : ViewModel() {
     fun onTabSelected(selected: SearchTab) {
         limit = BATCH
         tab = selected
+        saved[KEY_TAB] = selected.name
         debounceJob?.cancel()
         searchJob?.cancel()
 
@@ -94,8 +136,10 @@ class SearchViewModel : ViewModel() {
 
     fun startSearch(q: String) {
         query = q
+        saved[KEY_QUERY] = q
         limit = BATCH
         tab = SearchTab.ALL
+        saved[KEY_TAB] = SearchTab.ALL.name
         debounceJob?.cancel()
         submit()
     }
@@ -216,7 +260,18 @@ class SearchViewModel : ViewModel() {
         super.onCleared()
     }
 
+    init {
+        // Restored after a recreation: run the search again so the results come back.
+        if (query.isNotBlank() && tab.searchable) submit()
+    }
+
     companion object {
+        private const val KEY_QUERY = "query"
+        private const val KEY_TAB = "tab"
+        private const val KEY_MEDIA = "openMedia"
+        private const val KEY_WATCH = "watchQuery"
+        private const val KEY_PLAY = "playItem"
+
         /** Results per batch. Another batch loads when the user reaches the end of the list. */
         const val BATCH = 6
         private val SONG_HINTS = listOf(
@@ -229,5 +284,65 @@ class SearchViewModel : ViewModel() {
             val text = (item.title + " " + item.channel).lowercase()
             return SONG_HINTS.any { text.contains(it) }
         }
+    }
+}
+
+/** JSON conversion for values kept in [SavedStateHandle]. Invalid data is ignored instead of crashing. */
+internal object SavedItems {
+    fun mediaJson(i: UnifiedMediaItem): String = JSONObject()
+        .put("service", i.service.name)
+        .put("serviceId", i.serviceId)
+        .put("kind", i.kind.name)
+        .put("title", i.title)
+        .put("altTitles", JSONArray(i.altTitles))
+        .put("year", i.year ?: JSONObject.NULL)
+        .put("overview", i.overview)
+        .put("posterUrl", i.posterUrl ?: JSONObject.NULL)
+        .put("rating", i.rating ?: JSONObject.NULL)
+        .toString()
+
+    fun media(json: String?): UnifiedMediaItem? {
+        if (json == null) return null
+        return runCatching {
+            val o = JSONObject(json)
+            val alt = o.optJSONArray("altTitles") ?: JSONArray()
+            UnifiedMediaItem(
+                service = MetaService.valueOf(o.getString("service")),
+                serviceId = o.getString("serviceId"),
+                kind = MetaKind.valueOf(o.getString("kind")),
+                title = o.getString("title"),
+                altTitles = (0 until alt.length()).map { alt.getString(it) },
+                year = if (o.isNull("year")) null else o.getInt("year"),
+                overview = o.optString("overview"),
+                posterUrl = if (o.isNull("posterUrl")) null else o.getString("posterUrl"),
+                rating = if (o.isNull("rating")) null else o.getDouble("rating")
+            )
+        }.getOrNull()
+    }
+
+    fun videoJson(v: VideoItem): String = JSONObject()
+        .put("id", v.id)
+        .put("title", v.title)
+        .put("channel", v.channel)
+        .put("durationSec", v.durationSec)
+        .put("thumbnail", v.thumbnail ?: JSONObject.NULL)
+        .put("url", v.url)
+        .put("views", v.views ?: JSONObject.NULL)
+        .toString()
+
+    fun video(json: String?): VideoItem? {
+        if (json == null) return null
+        return runCatching {
+            val o = JSONObject(json)
+            VideoItem(
+                id = o.getString("id"),
+                title = o.getString("title"),
+                channel = o.optString("channel"),
+                durationSec = o.optLong("durationSec", 0L),
+                thumbnail = if (o.isNull("thumbnail")) null else o.getString("thumbnail"),
+                url = o.getString("url"),
+                views = if (o.isNull("views")) null else o.getLong("views")
+            )
+        }.getOrNull()
     }
 }

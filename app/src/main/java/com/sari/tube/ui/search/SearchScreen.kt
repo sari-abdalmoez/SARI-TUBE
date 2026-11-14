@@ -102,16 +102,13 @@ fun SearchScreen(
     var pick by remember { mutableStateOf<VideoItem?>(null) }
     val context = LocalContext.current
 
-    var playItem by remember { mutableStateOf<VideoItem?>(null) }
-    var openMedia by remember { mutableStateOf<UnifiedMediaItem?>(null) }
-    var watchQuery by remember { mutableStateOf<String?>(null) }
 
     // Back closes the open player first, and only then leaves the search screen.
     // Back goes one step at a time: player -> watch results -> details -> results list.
     // Handlers declared later take priority, so the player is declared last.
-    BackHandler(enabled = openMedia != null) { openMedia = null }
-    BackHandler(enabled = watchQuery != null) { watchQuery = null }
-    BackHandler(enabled = playItem != null) { playItem = null }
+    BackHandler(enabled = vm.openMedia != null) { vm.openMediaItem(null) }
+    BackHandler(enabled = vm.watchQuery != null) { vm.setWatch(null) }
+    BackHandler(enabled = vm.playItem != null) { vm.playVideo(null) }
 
     val listState = rememberLazyListState()
     val readyCount = (vm.state as? SearchUiState.Ready)?.items?.size ?: 0
@@ -154,8 +151,8 @@ fun SearchScreen(
                 Tab(
                     selected = i == selectedIndex,
                     onClick = {
-                        openMedia = null
-                        watchQuery = null
+                        vm.openMediaItem(null)
+                        vm.setWatch(null)
                         vm.onTabSelected(t)
                     },
                     text = { Text(t.label, fontWeight = FontWeight.SemiBold) }
@@ -163,31 +160,31 @@ fun SearchScreen(
             }
         }
 
-        val openItem = playItem
-        val watch = watchQuery
-        val media = openMedia
+        val openItem = vm.playItem
+        val watch = vm.watchQuery
+        val media = vm.openMedia
         val panelModifier = Modifier.fillMaxWidth().weight(1f)
         if (openItem != null) {
             key(openItem.id) {
                 StreamPlayer(
                     pageUrl = openItem.url,
                     title = openItem.title,
-                    onBack = { playItem = null },
+                    onBack = { vm.playVideo(null) },
                     modifier = panelModifier
                 )
             }
         } else if (watch != null) {
             WatchResultsPanel(
                 query = watch,
-                onBack = { watchQuery = null },
-                onPlay = { playItem = it },
+                onBack = { vm.setWatch(null) },
+                onPlay = { vm.playVideo(it) },
                 modifier = panelModifier
             )
         } else if (media != null) {
             MediaDetailPanel(
                 item = media,
-                onBack = { openMedia = null },
-                onWatch = { query, _ -> watchQuery = query },
+                onBack = { vm.openMediaItem(null) },
+                onWatch = { query, _ -> vm.setWatch(query) },
                 modifier = panelModifier
             )
         } else if (vm.tab == SearchTab.LOCAL) {
@@ -195,7 +192,7 @@ fun SearchScreen(
         } else if (vm.tab == SearchTab.MOVIES) {
             MediaResultsPanel(
                 query = vm.query,
-                onOpen = { openMedia = it },
+                onOpen = { vm.openMediaItem(it) },
                 modifier = panelModifier
             )
         } else when (val s = vm.state) {
@@ -249,7 +246,7 @@ fun SearchScreen(
                             items(shown, key = { it.id }) { item ->
                                 VideoCard(
                                     item = item,
-                                    onPlay = { playItem = item },
+                                    onPlay = { vm.playVideo(item) },
                                     onDownload = { pick = item }
                                 )
                             }

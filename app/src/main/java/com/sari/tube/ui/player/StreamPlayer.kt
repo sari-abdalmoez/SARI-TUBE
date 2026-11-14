@@ -1,6 +1,6 @@
 package com.sari.tube.ui.player
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.Arrangement
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,7 +65,7 @@ fun StreamPlayer(
         playerError = null
         session = null
         try {
-            val s = PlaybackResolver.resolve(pageUrl)
+            val s = PlaybackResolver.resolve(context, pageUrl)
             session = s
             if (selected !in s.streams.indices) selected = s.defaultIndex
         } catch (e: CancellationException) {
