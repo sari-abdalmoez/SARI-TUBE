@@ -57,6 +57,11 @@ import com.sari.tube.engine.UnifiedMediaItem
 import com.sari.tube.engine.VideoItem
 import com.sari.tube.engine.WebSearch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
+import com.sari.tube.engine.PageScraper
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -341,7 +346,11 @@ fun MediaDetailPanel(
     }
 }
 
-/** Web results for a watch query. Picking one opens it in the player, which extracts the video from that page. */
+/**
+ * Web results for a watch query. DRM services are removed. Each remaining page is checked for a
+ * playable video, and pages with video are listed first. Pages that could not be verified come after
+ * them, marked, so nothing is hidden without reason.
+ */
 @Composable
 fun WatchResultsPanel(
     query: String,
@@ -349,7 +358,9 @@ fun WatchResultsPanel(
     onPlay: (VideoItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var results by remember(query) { mutableStateOf<List<VideoItem>?>(null) }
+    var verified by remember(query) { mutableStateOf<List<VideoItem>?>(null) }
+    var unverified by remember(query) { mutableStateOf<List<VideoItem>>(emptyList()) }
+    var drmHidden by remember(query) { mutableIntStateOf(0) }
     var error by remember(query) { mutableStateOf<String?>(null) }
     var loading by remember(query) { mutableStateOf(true) }
     var attempt by remember(query) { mutableIntStateOf(0) }
@@ -357,9 +368,22 @@ fun WatchResultsPanel(
     LaunchedEffect(query, attempt) {
         loading = true
         error = null
-        results = null
+        verified = null
         try {
-            results = WebSearch.search(query)
+            val raw = WebSearch.search(query)
+            val usable = raw.filterNot { PageScraper.isDrmSite(it.url) }
+            drmHidden = raw.size - usable.size
+            // Each page is checked in parallel. A page that does not answer in time counts as unverified.
+            val checks = coroutineScope {
+                usable.map { item ->
+                    async {
+                        val ok = withTimeoutOrNull(25_000L) { PageScraper.hasPlayableVideo(item.url) } ?: false
+                        item to ok
+                    }
+                }.awaitAll()
+            }
+            verified = checks.filter { it.second }.map { it.first }
+            unverified = checks.filterNot { it.second }.map { it.first }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -380,15 +404,25 @@ fun WatchResultsPanel(
             }
         }
         Text(
-            "الفيديو يُستخرج من الصفحة التي تختارها، وقد لا تعمل كل الصفحات. إن فشلت صفحة جرّب غيرها.",
+            "تم استبعاد المواقع المحمية (DRM). الصفحات الأولى فيها فيديو تم التحقق منه.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             modifier = Modifier.padding(vertical = 6.dp)
         )
 
         when {
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            loading -> Column(
+                Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "جارٍ البحث والتحقق من الصفحات…",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp
+                )
             }
             error != null -> Column(
                 Modifier.fillMaxSize(),
@@ -399,30 +433,72 @@ fun WatchResultsPanel(
                 Spacer(Modifier.height(12.dp))
                 Button(onClick = { attempt++ }) { Text("إعادة المحاولة") }
             }
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(results.orEmpty(), key = { it.id }) { r ->
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surface)
-                            .clickable { onPlay(r) }
-                            .padding(12.dp)
-                    ) {
-                        Text(
-                            r.title,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(r.channel, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1)
+            else -> {
+                val good = verified.orEmpty()
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (drmHidden > 0) {
+                        item {
+                            Text(
+                                "أُخفيت $drmHidden صفحة محمية بـ DRM",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    if (good.isEmpty() && unverified.isEmpty()) {
+                        item {
+                            Text(
+                                "لم نجد صفحات تحتوي فيديو قابلاً للتشغيل. جرّب بحثاً آخر.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(16.dp)
+                            )
+                        }
+                    }
+                    items(good, key = { it.id }) { r -> WatchRow(r, verified = true, onPlay = onPlay) }
+                    if (unverified.isNotEmpty()) {
+                        item {
+                            Text(
+                                "صفحات لم نتأكد من وجود فيديو فيها",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        }
+                        items(unverified, key = { "u_${it.id}" }) { r -> WatchRow(r, verified = false, onPlay = onPlay) }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun WatchRow(item: VideoItem, verified: Boolean, onPlay: (VideoItem) -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable { onPlay(item) }
+            .padding(12.dp)
+    ) {
+        Text(
+            item.title,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 14.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            if (verified) item.channel else "${item.channel} • غير متحقق",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 12.sp,
+            maxLines = 1
+        )
     }
 }
 

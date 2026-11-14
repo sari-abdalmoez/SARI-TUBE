@@ -75,6 +75,21 @@ object PageScraper {
         null
     }
 
+    /** Page markers of DRM players (Widevine, PlayReady, FairPlay). Such pages cannot be played, so they are skipped. */
+    private val DRM_MARKERS = listOf("widevine", "playready", "fairplay", "com.microsoft.playready")
+
+    /**
+     * True when the page can give a playable video: it is not DRM-protected and has a verified direct link.
+     * Used to filter web search results, so pages with no video are not offered.
+     */
+    suspend fun hasPlayableVideo(pageUrl: String): Boolean = withContext(Dispatchers.IO) {
+        if (isDrmSite(pageUrl)) return@withContext false
+        val doc = fetch(pageUrl, pageUrl) ?: return@withContext false
+        val html = doc.html().lowercase()
+        if (DRM_MARKERS.any { html.contains(it) }) return@withContext false
+        scrape(pageUrl) != null
+    }
+
     private fun collect(doc: Document, base: String, out: MutableSet<Candidate>) {
         // Attributes that name a media file.
         doc.select("video[src], video source[src], source[src], audio[src]").forEach { el ->

@@ -108,7 +108,7 @@ fun SearchPill(
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                 if (value.isEmpty()) {
                     Text(
-                        "أغاني سودانية",
+                        "ابحث عن فيلم أو مسلسل أو فيديو",
                         color = HintGray,
                         fontSize = 18.sp,
                         textAlign = TextAlign.End,

@@ -1,5 +1,10 @@
 package com.sari.tube.ui
 
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.ArrowBack
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
@@ -54,12 +59,12 @@ private data class ToolCard(
 
 /** Main tools page. No API keys or YouTube account cards are included. */
 @Composable
-fun ToolsScreen(onOpenDownloadSettings: () -> Unit) {
+fun ToolsScreen(onOpenDownloadSettings: () -> Unit, onBack: () -> Unit = {}) {
     val ctx = LocalContext.current
     var showAbout by remember { mutableStateOf(false) }
 
     val cards = listOf(
-        ToolCard("المظهر", ThemeMode.label(), Icons.Filled.Settings) { ThemeMode.next(ctx) },
+        ToolCard("المظهر", ThemeMode.label(), themeIcon()) { ThemeMode.next(ctx) },
         ToolCard(
             "إعدادات التنزيل",
             "عدد المهام والسرعة والشبكة",
@@ -90,6 +95,18 @@ fun ToolsScreen(onOpenDownloadSettings: () -> Unit) {
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp)
     ) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    Icons.Filled.ArrowBack,
+                    contentDescription = "رجوع",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
         Text(
             "الأدوات",
             color = MaterialTheme.colorScheme.onSurface,
@@ -178,6 +195,13 @@ private fun ToolTile(card: ToolCard, modifier: Modifier) {
             )
         }
     }
+}
+
+/** Moon for dark, sun for light, phone for "follow the phone". The icon follows the saved mode. */
+private fun themeIcon(): ImageVector = when (ThemeMode.value) {
+    1 -> Icons.Filled.DarkMode
+    2 -> Icons.Filled.LightMode
+    else -> Icons.Filled.PhoneAndroid
 }
 
 private fun shareApp(ctx: Context) {

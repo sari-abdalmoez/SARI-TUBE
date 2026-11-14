@@ -157,7 +157,8 @@ class MainActivity : ComponentActivity() {
                                 else -> ToolsScreen(
                                     onOpenDownloadSettings = {
                                         toolsPage = TOOLS_DOWNLOAD
-                                    }
+                                    },
+                                    onBack = { tab = TAB_DOWNLOAD }
                                 )
                             }
                             tab == TAB_PLAY -> DownloadsScreen(onBack = { tab = TAB_DOWNLOAD })
