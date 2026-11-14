@@ -718,7 +718,7 @@ private fun FullscreenEffects(activity: Activity?, dialogWindow: Window?) {
             w.setDimAmount(0f)
             WindowCompat.setDecorFitsSystemWindows(w, false)
             WindowInsetsControllerCompat(w, w.decorView).apply {
-                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BY_SWIPE
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 hide(WindowInsetsCompat.Type.systemBars())
             }
         }
