@@ -122,12 +122,12 @@ private class PlayerUi(val player: ExoPlayer) {
         }
     }
 
-    fun setSpeed(value: Float) {
+    fun applySpeed(value: Float) {
         player.setPlaybackSpeed(value)
         speed = value
     }
 
-    fun setVolume(value: Float) {
+    fun applyVolume(value: Float) {
         player.volume = value
         volume = value
     }
@@ -525,7 +525,7 @@ private fun SettingsDialog(
                     OptionRow(
                         label = if (s % 1f == 0f) "${s.toInt()}x" else "${s}x",
                         selected = kotlin.math.abs(ui.speed - s) < 0.01f
-                    ) { ui.setSpeed(s) }
+                    ) { ui.applySpeed(s) }
                 }
 
                 if (subtitles.isNotEmpty()) {
@@ -553,7 +553,7 @@ private fun SettingsDialog(
                     Icon(Icons.Filled.VolumeUp, contentDescription = null, tint = Color.White)
                     Slider(
                         value = ui.volume,
-                        onValueChange = { ui.setVolume(it) },
+                        onValueChange = { ui.applyVolume(it) },
                         valueRange = 0f..1f,
                         modifier = Modifier.weight(1f).padding(start = 8.dp),
                         colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent)
