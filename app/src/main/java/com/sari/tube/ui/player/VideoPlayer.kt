@@ -143,13 +143,13 @@ private class PlayerUi(val player: ExoPlayer, private val audio: AudioManager?) 
         }
     }
 
-    fun setSpeed(value: Float) {
+    fun applySpeed(value: Float) {
         player.setPlaybackSpeed(value)
         speed = value
     }
 
     /** Changes the phone's music volume, which is the volume the user hears. */
-    fun setVolume(value: Float) {
+    fun applyVolume(value: Float) {
         val a = audio
         if (a != null) {
             val max = a.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
@@ -347,7 +347,7 @@ private fun PlayerSurface(
                     VerticalSlider(
                         value = ui.volume,
                         onChange = {
-                            ui.setVolume(it)
+                            ui.applyVolume(it)
                             ui.touch()
                         }
                     )
@@ -647,7 +647,7 @@ private fun SettingsDialog(
                 SectionTitle("السرعة")
                 SPEEDS.forEach { s ->
                     OptionRow(speedLabel(s), selected = kotlin.math.abs(ui.speed - s) < 0.01f) {
-                        ui.setSpeed(s)
+                        ui.applySpeed(s)
                     }
                 }
 
