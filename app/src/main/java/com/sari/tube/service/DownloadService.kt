@@ -1,10 +1,5 @@
 package com.sari.tube.service
 
-import com.sari.tube.engine.MediaFormats
-import com.sari.tube.engine.rememberRequest
-
-import com.sari.tube.engine.DownloadRequest
-
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -12,8 +7,10 @@ import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.sari.tube.engine.ActiveDownload
 import com.sari.tube.engine.ActiveDownloads
 import com.sari.tube.engine.AppPrefs
+import com.sari.tube.engine.DlState
 import com.sari.tube.engine.Candidate
 import com.sari.tube.engine.DownloadCancelledException
 import com.sari.tube.engine.DownloadControl
@@ -24,8 +21,6 @@ import com.sari.tube.engine.UrlParser
 import com.sari.tube.engine.YtBlockedException
 import com.sari.tube.engine.YtDlpDownloader
 import com.sari.tube.engine.YtDlpEngine
-import com.sari.tube.engine.YtDlpUpdater
-import com.sari.tube.engine.YtHttp403Exception
 import com.sari.tube.engine.YtDlpException
 import com.sari.tube.storage.HistoryStore
 import com.sari.tube.storage.PublicSaver
@@ -54,19 +49,21 @@ class DownloadService : Service() {
         private const val TAG = "SariTube"
         private const val DEFAULT_SELECTOR = "bv*+ba/b"
 
+        /** Asks the running service to cancel one download. */
+        fun cancel(context: Context, id: Int) {
+            context.startService(
+                Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_CANCEL)
+                    .putExtra(EXTRA_ID, id)
+            )
+        }
+
         fun start(context: Context, input: String, selector: String = DEFAULT_SELECTOR, audioOnly: Boolean = false) {
             val intent = Intent(context, DownloadService::class.java)
                 .putExtra(EXTRA_INPUT, input)
                 .putExtra(EXTRA_SELECTOR, selector)
                 .putExtra(EXTRA_AUDIO, audioOnly)
             ContextCompat.startForegroundService(context, intent)
-        }
-
-        fun cancel(context: Context, id: Int) {
-            val cancelIntent = Intent(context, DownloadService::class.java)
-                .setAction(ACTION_CANCEL)
-                .putExtra(EXTRA_ID, id)
-            context.startService(cancelIntent)
         }
     }
 
@@ -96,10 +93,8 @@ class DownloadService : Service() {
         val audioOnly = intent.getBooleanExtra(EXTRA_AUDIO, false)
 
         val id = nextId++
-        rememberRequest(id, DownloadRequest(input, selector, audioOnly))
         val control = DownloadControl()
         controls[id] = control
-        ActiveDownloads.enqueue(id, input)
         startForeground(
             DownloadNotifier.FG_ID,
             notifier.foreground(controls.size),
@@ -113,26 +108,23 @@ class DownloadService : Service() {
         id: Int, input: String, control: DownloadControl, selector: String, audioOnly: Boolean
     ) {
         var holdsSlot = false
-        var succeeded = false
+        ActiveDownloads.put(queuedState(id, input))
         try {
             waitForSlot(id, control)
             holdsSlot = true
-            ActiveDownloads.running(id)
+            ActiveDownloads.modify(id) { it.copy(state = DlState.RUNNING, message = "جارٍ التحميل") }
 
             val url = UrlParser.firstHttpUrl(input)
             if (url != null) downloadSmart(id, input, url, control, selector, audioOnly)
             else downloadDirect(id, input, control)
-
-            succeeded = true
         } catch (e: DownloadCancelledException) {
             ActiveDownloads.remove(id)
             notifier.cancelled(id)
         } catch (e: Exception) {
             Log.e(TAG, "download failed (id=$id, input=$input)", e)
-            ActiveDownloads.failed(id, e.message ?: "خطأ غير معروف")
+            ActiveDownloads.modify(id) { it.copy(state = DlState.FAILED, message = e.message ?: "خطأ غير معروف") }
             notifier.failed(id, e.message ?: "خطأ غير معروف")
         } finally {
-            if (succeeded) ActiveDownloads.remove(id)
             if (holdsSlot) activeSlots.decrementAndGet()
             controls.remove(id)
             if (controls.isEmpty()) {
@@ -156,43 +148,6 @@ class DownloadService : Service() {
         } catch (e: YtBlockedException) {
             throw e
         } catch (e: YtDlpException) {
-            // Any extraction failure first refreshes yt-dlp, because sites change their pages often.
-            // Refresh the bundled yt-dlp extractor, then retry the same URL once.
-            val updateStatus = YtDlpUpdater.forceUpdate(this)
-            Log.w(TAG, "HTTP 403; extractor refresh result: $updateStatus")
-
-            var failure: YtDlpException = e
-
-            if (updateStatus.startsWith("update:")) {
-                try {
-                    downloadWithYtDlp(id, url, control, selector, audioOnly)
-                    return
-                } catch (retry: DownloadCancelledException) {
-                    throw retry
-                } catch (retry: YtBlockedException) {
-                    throw retry
-                } catch (retry: Exception) {
-                    failure = retry as? YtDlpException
-                        ?: YtDlpException(retry.message ?: "فشلت إعادة المحاولة بعد تحديث المحرك")
-                    Log.w(TAG, "yt-dlp retry failed: ${retry.message}")
-                }
-            } else {
-                failure = YtDlpException(
-                    "${e.message} (تعذر تحديث المحرك: $updateStatus)"
-                )
-            }
-
-            // The fallback is allowed only for a verified direct media URL.
-            try {
-                downloadDirect(id, input, control)
-            } catch (fallback: DownloadCancelledException) {
-                throw fallback
-            } catch (fallback: Exception) {
-                throw IOException(
-                    "${failure.message}\nالمحرك الاحتياطي: ${fallback.message}"
-                )
-            }
-        } catch (e: YtDlpException) {
             Log.w(TAG, "yt-dlp failed, using fallback engine: ${e.message}")
             try {
                 downloadDirect(id, input, control)
@@ -208,25 +163,7 @@ class DownloadService : Service() {
         id: Int, url: String, control: DownloadControl, selector: String, audioOnly: Boolean
     ) {
         notifier.progress(id, "جارٍ تجهيز التحميل…", 0, 0, 0, indeterminate = true)
-        ActiveDownloads.updateProgress(
-            id,
-            title = "جارٍ تجهيز التحميل…",
-            progress = -1,
-            message = "جارٍ تجهيز محرك التحميل"
-        )
         if (!YtDlpEngine.awaitReady()) throw YtDlpException("محرك yt-dlp لم يجهز بعد")
-        // The cover of the item is shown in the download card instead of a placeholder.
-        // Use the cached analysis if the link was already analyzed. Otherwise analyze in the background,
-        // so the download itself never waits for the analysis.
-        val cached = MediaFormats.info(url)
-        if (cached != null) {
-            cached.thumbnail?.let { ActiveDownloads.setThumbnail(id, it) }
-        } else {
-            scope.launch {
-                runCatching { MediaFormats.fetch(url) }
-                MediaFormats.info(url)?.thumbnail?.let { ActiveDownloads.setThumbnail(id, it) }
-            }
-        }
 
         var last = 0L
         val file = YtDlpDownloader.download(
@@ -236,29 +173,16 @@ class DownloadService : Service() {
             if (now - last >= 1000) {
                 last = now
                 val remaining = if (eta > 0) "  •  متبقٍ ${eta} ث" else ""
-                val pct = percent.toInt()
-                if (pct >= 0) notifier.percent(id, "تحميل الوسائط", pct, "$pct%$remaining")
-                else notifier.progress(id, "تحميل الوسائط", 0, 0, 0, indeterminate = true)
-                ActiveDownloads.updateProgress(
-                    id,
-                    title = "تحميل الوسائط",
-                    progress = if (percent >= 0) percent.toInt() else null,
-                    etaSeconds = eta,
-                    message = remaining
-                )
+                ActiveDownloads.modify(id) { it.copy(percent = percent.toInt(), etaSec = eta.toLong(), message = "جارٍ التحميل") }
+                notifier.percent(id, "تحميل الوسائط", percent.toInt(), "${percent.toInt()}%$remaining")
             }
         }
         // The numeric prefix is only an internal resume identifier, not the media title.
         val displayName = file.name.replaceFirst(
             Regex("^${Regex.escape(YtDlpDownloader.idFor(url))}_"), ""
         )
-        finishFile(id, file, displayName, YtDlpDownloader.mimeFor(file.name), findCover(url))
-        // Captions are optional. They are fetched after the media is already saved, so they never delay it.
-        scope.launch {
-            runCatching { YtDlpDownloader.fetchSubtitles(url, File(cacheDir, "ytdl")) }
-            saveSubtitles(url, displayName)
-            removeYtdlLeftovers(url)
-        }
+        finishFile(id, file, displayName, YtDlpDownloader.mimeFor(file.name))
+        removeYtdlLeftovers(url)
     }
 
     private suspend fun downloadDirect(id: Int, input: String, control: DownloadControl) {
@@ -267,60 +191,41 @@ class DownloadService : Service() {
         val temp = File(dir, "dl_${input.trim().hashCode().toUInt()}.bin")
 
         notifier.progress(id, "جارٍ تحليل الرابط…", 0, 0, 0, indeterminate = true)
-        ActiveDownloads.updateProgress(
-            id,
-            title = "جارٍ تحليل الرابط…",
-            progress = -1,
-            message = "جارٍ تحليل الرابط"
-        )
         var last = 0L
         val chosen = fetchFirstWorking(input, temp, control) { name, downloaded, total, speed ->
             val now = System.currentTimeMillis()
             if (now - last >= 1000) {
                 last = now
+                ActiveDownloads.modify(id) {
+                    it.copy(
+                        title = name,
+                        percent = if (total > 0) (downloaded * 100 / total).toInt() else -1,
+                        downloadedBytes = downloaded,
+                        totalBytes = total,
+                        speedBps = speed,
+                        message = "جارٍ التحميل"
+                    )
+                }
                 notifier.progress(id, name, downloaded, total, speed)
-                ActiveDownloads.updateProgress(
-                    id,
-                    title = name,
-                    progress = if (total > 0L) {
-                        ((downloaded * 100L) / total).toInt().coerceIn(0, 100)
-                    } else {
-                        -1
-                    },
-                    downloadedBytes = downloaded,
-                    totalBytes = total,
-                    speedBytesPerSec = speed,
-                    message = "جارٍ تنزيل الملف"
-                )
             }
         }
         finishFile(id, temp, chosen.fileName, chosen.mime)
         File(temp.parentFile, temp.name + ".parts").deleteRecursively()
     }
 
-    /** Copies the file to Downloads, records it in history, then removes the temporary copy. */
-    /** yt-dlp writes the thumbnail next to the media file. It becomes the cover of the saved item. */
-    private fun findCover(url: String): File? {
-        val id = YtDlpDownloader.idFor(url)
-        return File(cacheDir, "ytdl").listFiles { f ->
-            f.extension.lowercase() == "jpg" && (f.name.startsWith("${id}_") || f.name.startsWith("$id."))
-        }?.maxByOrNull { it.lastModified() }
-    }
+    private fun queuedState(id: Int, input: String) = ActiveDownload(
+        id = id,
+        title = input.trim().take(60),
+        state = DlState.QUEUED,
+        percent = -1,
+        downloadedBytes = 0L,
+        totalBytes = -1L,
+        speedBps = -1L,
+        etaSec = -1L,
+        message = "في الانتظار"
+    )
 
-    /** Captions that yt-dlp fetched are saved next to the media as <name>.<lang>.vtt. */
-    private fun saveSubtitles(url: String, displayName: String) {
-        val id = YtDlpDownloader.idFor(url)
-        val base = displayName.substringBeforeLast('.')
-        File(cacheDir, "ytdl").listFiles { f ->
-            f.extension.lowercase() == "vtt" && (f.name.startsWith("${id}_") || f.name.startsWith("$id."))
-        }?.forEach { sub ->
-            val lang = sub.nameWithoutExtension.substringAfterLast('.', "sub")
-            runCatching { PublicSaver.save(this, sub, "$base.$lang.vtt", "text/vtt") }
-                .onFailure { Log.w(TAG, "subtitle save failed", it) }
-        }
-    }
-
-    /** Removes the info and partial files yt-dlp leaves after a successful download. */
+    /** yt-dlp writes thumbnails and info files next to the video. Remove them after success. */
     private fun removeYtdlLeftovers(url: String) {
         val id = YtDlpDownloader.idFor(url)
         File(cacheDir, "ytdl").listFiles { f ->
@@ -328,14 +233,14 @@ class DownloadService : Service() {
         }?.forEach { it.delete() }
     }
 
-    private fun finishFile(id: Int, src: File, name: String, mime: String, cover: File? = null) {
+    /** Copies the file to Downloads, records it in history, then removes the temporary copy. */
+    private fun finishFile(id: Int, src: File, name: String, mime: String) {
         val uri = PublicSaver.save(this, src, name, mime)
-        val rec = runCatching { HistoryStore.add(this, src, name, mime, uri.toString(), cover) }
+        runCatching { HistoryStore.add(this, src, name, mime, uri.toString()) }
             .onFailure { Log.w(TAG, "history record failed", it) }
-            .getOrNull()
         src.delete()
-        cover?.delete()
-        notifier.done(id, name, PublicSaver.FOLDER, uri, mime, rec?.thumbPath)
+        notifier.done(id, name, PublicSaver.FOLDER, uri, mime)
+        ActiveDownloads.remove(id)
     }
 
     /** Waits in the queue until fewer downloads than the chosen limit are running. */
@@ -365,7 +270,7 @@ class DownloadService : Service() {
         for (round in 1..2) {
             val candidates = MediaResolver.candidates(input)
             if (candidates.isEmpty()) {
-                lastError = "لم يتم العثور على رابط ملف وسائط مباشر؛ لن يتم تنزيل صفحة الموقع كأنها فيديو"
+                lastError = "الرابط غير صالح"
                 break
             }
             for (c in candidates) {

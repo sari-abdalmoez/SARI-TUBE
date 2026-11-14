@@ -17,13 +17,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.foundation.layout.width
-import com.sari.tube.engine.MetadataKeys
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,7 +39,6 @@ fun SettingsScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     var parallel by remember { mutableStateOf(AppPrefs.maxParallel(ctx)) }
     var speed by remember { mutableStateOf(AppPrefs.speedKbps(ctx)) }
-    var mobileData by remember { mutableStateOf(AppPrefs.allowMobileData(ctx)) }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(
@@ -55,7 +49,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع", tint = MaterialTheme.colorScheme.onBackground)
             }
             Text(
-                "إعدادات التنزيل",
+                "الإعدادات",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground
@@ -92,80 +86,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
-            SectionTitle("الشبكة")
-
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Switch(
-                    checked = mobileData,
-                    onCheckedChange = {
-                        mobileData = it
-                        AppPrefs.setAllowMobileData(ctx, it)
-                    }
-                )
-
-                Spacer(Modifier.weight(1f))
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        "التنزيل عبر بيانات الهاتف",
-                        color = MaterialTheme.colorScheme.onBackground,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        if (mobileData) {
-                            "مسموح عبر بيانات الهاتف وWi-Fi"
-                        } else {
-                            "Wi-Fi أو Ethernet فقط"
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-            SectionTitle("مفتاح TMDB للأفلام والمسلسلات")
-            var tmdbKey by remember { mutableStateOf(MetadataKeys.tmdb().orEmpty()) }
-            var tmdbSaved by remember { mutableStateOf(false) }
-            OutlinedTextField(
-                value = tmdbKey,
-                onValueChange = {
-                    tmdbKey = it
-                    tmdbSaved = false
-                },
-                singleLine = true,
-                label = { Text("مفتاح API") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Row(
-                Modifier.fillMaxWidth().padding(top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(onClick = {
-                    MetadataKeys.setTmdb(ctx, tmdbKey)
-                    tmdbSaved = true
-                }) { Text("حفظ") }
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    if (tmdbSaved) "تم الحفظ" else "",
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 13.sp
-                )
-            }
-            Text(
-                "المفتاح مجاني من themoviedb.org ويُحفظ على هذا الجهاز فقط. بدونه تعمل خدمتا AniList وTVMaze فقط.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp
-            )
-
             Spacer(Modifier.height(12.dp))
             Text(
-                "حد السرعة مشترك وتقريبي. وضع Wi-Fi فقط يمنع بدء تنزيل جديد عبر بيانات الهاتف.",
+                "الحدود تنطبق على جميع التحميلات النشطة معاً، وهي تقريبية.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp
             )

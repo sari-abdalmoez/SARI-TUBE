@@ -83,13 +83,7 @@ fun FormatSheet(url: String, onDismiss: () -> Unit, onConfirm: (MediaOption) -> 
                     CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
                 err != null -> Column {
-                    Text(err, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
-                    Spacer(Modifier.height(12.dp))
-                    GradientAction(
-                        text = "تنزيل بأفضل جودة",
-                        enabled = true,
-                        onClick = { onConfirm(MediaOption("best", "أفضل جودة متاحة", false, null, "bv*+ba/b")) }
-                    )
+                    Text(err, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                     TextButton(onClick = { attempt++ }) {
                         Text("إعادة المحاولة", color = MaterialTheme.colorScheme.primary)
                     }

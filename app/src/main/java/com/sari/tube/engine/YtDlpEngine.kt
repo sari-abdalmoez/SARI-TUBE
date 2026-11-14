@@ -71,7 +71,7 @@ object YtDlpUpdater {
     private const val TAG = "SariTube"
     private const val PREFS = "ytdlp_update"
     private const val KEY_LAST = "last_check"
-    private const val INTERVAL_MS = 6L * 60 * 60 * 1000
+    private const val INTERVAL_MS = 24L * 60 * 60 * 1000
 
     fun updateIfDue(app: Context) {
         val last = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_LAST, 0L)

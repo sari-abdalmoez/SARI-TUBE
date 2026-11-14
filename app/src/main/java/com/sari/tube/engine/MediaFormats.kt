@@ -1,7 +1,5 @@
 package com.sari.tube.engine
 
-import java.util.concurrent.ConcurrentHashMap
-
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +25,14 @@ data class MediaOption(
  */
 object MediaFormats {
     private val counter = AtomicLong(0)
-    private val infoCache = ConcurrentHashMap<String, LinkInfo>()
+    private const val TTL_MS = 10 * 60_000L
+
+    private class Cached(val at: Long, val options: List<MediaOption>)
+
+    /** Recently analyzed links. Reopening the same link within 10 minutes skips another yt-dlp call. */
+    private val cache = object : LinkedHashMap<String, Cached>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Cached>?): Boolean = size > 32
+    }
     private val VIDEO_TIERS = listOf(360, 480, 720, 1080)
 
     private data class Fmt(
@@ -41,6 +46,9 @@ object MediaFormats {
     )
 
     suspend fun fetch(url: String): List<MediaOption> = withContext(Dispatchers.IO) {
+        synchronized(cache) { cache[url] }?.let { c ->
+            if (System.currentTimeMillis() - c.at < TTL_MS) return@withContext c.options
+        }
         if (!YtDlpEngine.awaitReady()) throw SearchException("محرك yt-dlp لم يجهز بعد، حاول لاحقاً")
         val processId = "fmt-${counter.incrementAndGet()}"
         val request = YoutubeDLRequest(url).apply {
@@ -53,21 +61,11 @@ object MediaFormats {
         val out = try {
             YtDlpLock.shared { YoutubeDL.getInstance().execute(request, processId).out }
         } catch (e: Exception) {
-            throw SearchException(friendlyFormatError(e.message))
+            throw SearchException("تعذّر قراءة التنسيقات: ${e.message?.lineSequence()?.firstOrNull().orEmpty().take(160)}")
         }
-        infoOf(out)?.let { infoCache[url] = it }
-        parse(out)
-    }
-
-    /** Title and thumbnail from the last analysis of this link, if it was done. */
-    fun info(url: String): LinkInfo? = infoCache[url]
-
-    private fun infoOf(out: String): LinkInfo? {
-        val line = out.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("{") } ?: return null
-        val o = JSONObject(line)
-        val title = o.s("title").ifBlank { return null }
-        val thumb = o.s("thumbnail").takeIf { it.isNotBlank() }
-        return LinkInfo(title, thumb)
+        val options = parse(out)
+        synchronized(cache) { cache[url] = Cached(System.currentTimeMillis(), options) }
+        options
     }
 
     fun parse(out: String): List<MediaOption> {
@@ -121,7 +119,7 @@ object MediaFormats {
         val result = ArrayList<MediaOption>()
         audioChoices.forEachIndexed { index, audio ->
             val bitrate = audio.abr.roundToInt()
-            val label = if (index == 0) "سريع · ${audio.ext.uppercase(Locale.ROOT)}" else if (bitrate > 0) {
+            val label = if (bitrate > 0) {
                 "$bitrate kbps · ${audio.ext.uppercase(Locale.ROOT)}"
             } else {
                 "صوت · ${audio.ext.uppercase(Locale.ROOT)}"
@@ -147,18 +145,9 @@ object MediaFormats {
                 audioNeeded -> best.size + (bestAudio?.size ?: 0L)
                 else -> best.size
             }
-            result.add(MediaOption("v$tier", videoLabel(tier), false, total, "b[height<=$tier][ext=mp4]/bv*[height<=$tier]+ba[ext=m4a]/bv*[height<=$tier]+ba/b[height<=$tier]"))
+            result.add(MediaOption("v$tier", "${tier}p", false, total, "b[height<=$tier][ext=mp4]/bv*[height<=$tier]+ba[ext=m4a]/bv*[height<=$tier]+ba/b[height<=$tier]"))
         }
 
-        // Some sites (for example Instagram) give no height for their formats. Offer the best video anyway.
-        if (result.none { !it.isAudio }) {
-            val anyVideo = fmts.filter { it.hasVideo }
-                .maxWithOrNull(compareBy<Fmt>({ it.height }, { it.size ?: 0L }))
-            if (anyVideo != null) {
-                val total = anyVideo.size?.let { if (anyVideo.hasAudio) it else it + (bestAudio?.size ?: 0L) }
-                result.add(MediaOption("video_best", "فيديو · أفضل جودة متاحة", false, total, "bv*+ba/b"))
-            }
-        }
         return if (result.isEmpty()) fallback() else result
     }
 
@@ -166,29 +155,5 @@ object MediaFormats {
     private fun fallback(): List<MediaOption> =
         listOf(MediaOption("best", "أفضل جودة متاحة", false, null, "bv*+ba/b"))
 
-    /** Turns raw yt-dlp text into one clear sentence. The raw text is written to Logcat instead. */
-    fun friendlyFormatError(raw: String?): String {
-        val m = raw.orEmpty()
-        return when {
-            m.contains("Network is unreachable", true) || m.contains("Unable to download webpage", true) ||
-                m.contains("Name or service not known", true) || m.contains("timed out", true) ->
-                "لا يوجد اتصال بالإنترنت أو الموقع لا يستجيب. تحقق من الشبكة ثم أعد المحاولة"
-            m.contains("Unsupported URL", true) -> "هذا الرابط غير مدعوم"
-            m.contains("Private video", true) || m.contains("login", true) || m.contains("Sign in", true) ->
-                "هذا المحتوى يتطلب تسجيل دخول أو خاص، ولا يمكن تنزيله"
-            else -> "تعذّر قراءة الجودات لهذا الرابط. يمكنك تنزيله بأفضل جودة متاحة"
-        }
-    }
-
-    private fun videoLabel(tier: Int): String = when (tier) {
-        360 -> "سريع (360p)"
-        480 -> "متوسطة (480p)"
-        720 -> "جودة عالية (720p)"
-        else -> "جودة عالية (${tier}p)"
-    }
-
     private fun JSONObject.s(key: String): String = if (isNull(key)) "" else optString(key)
 }
-
-/** Title and thumbnail of a link, read from the same yt-dlp analysis. */
-data class LinkInfo(val title: String, val thumbnail: String?)

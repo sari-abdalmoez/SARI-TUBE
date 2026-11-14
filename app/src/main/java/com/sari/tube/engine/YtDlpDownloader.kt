@@ -17,9 +17,6 @@ class YtUnsupportedException(message: String) : YtDlpException(message)
 /** Access is blocked (private, removed, login, region). No other engine can get around this. */
 class YtBlockedException(message: String) : YtDlpException(message)
 
-/** HTTP 403 may be caused by an outdated extractor. */
-class YtHttp403Exception(message: String) : YtDlpException(message)
-
 /**
  * Downloads one item with yt-dlp.
  *
@@ -60,28 +57,12 @@ object YtDlpDownloader {
         outDir.mkdirs()
         val id = idFor(url)
         return try {
-            runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = false, embedCover = audioOnly)
+            runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = false)
         } catch (e: YtDlpException) {
             if (control.isCancelled || e is YtBlockedException || e is YtUnsupportedException) throw e
-            val msg = e.message.orEmpty()
-            when {
-                // A short network drop is common. One retry after a pause is worth it.
-                msg.contains("Network is unreachable", true) -> {
-                    Log.w(TAG, "network unreachable, retrying once: $msg")
-                    Thread.sleep(3000)
-                    runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = false, embedCover = audioOnly)
-                }
-                // Embedding the cover needs FFmpeg post-processing. If it fails, keep the audio and skip the cover.
-                audioOnly && !msg.contains("rename", true) -> {
-                    Log.w(TAG, "embedding cover failed, retrying without it: $msg")
-                    runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = false, embedCover = false)
-                }
-                msg.contains("rename", true) -> {
-                    Log.w(TAG, "rename failed, retrying with ASCII names: $msg")
-                    runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = true, embedCover = false)
-                }
-                else -> throw e
-            }
+            if (!e.message.orEmpty().contains("rename", true)) throw e
+            Log.w(TAG, "rename failed, retrying with ASCII names: ${e.message}")
+            runOnce(url, outDir, id, control, selector, audioOnly, onProgress, asciiNames = true)
         }
     }
 
@@ -93,8 +74,7 @@ object YtDlpDownloader {
         selector: String,
         audioOnly: Boolean,
         onProgress: (percent: Float, etaSec: Long) -> Unit,
-        asciiNames: Boolean,
-        embedCover: Boolean
+        asciiNames: Boolean
     ): File {
         val processId = "dl-$id-${if (asciiNames) "a" else "t"}"
         // Keep the real media title in both normal and ASCII retry filenames.
@@ -107,11 +87,13 @@ object YtDlpDownloader {
             if (asciiNames) addOption("--restrict-filenames")
             addOption("--write-thumbnail")
             addOption("--convert-thumbnails", "jpg")
-            if (embedCover) addOption("--embed-thumbnail")
             addOption("--no-playlist")
             addOption("--no-mtime")
             addOption("--continue")
             addOption("--newline")
+            // Parallel fragments speed up HLS/DASH; a larger chunk reduces per-chunk throttling.
+            addOption("--concurrent-fragments", "4")
+            addOption("--http-chunk-size", "10M")
         }
 
         // yt-dlp does not stop on its own when the user cancels, so a watcher kills the process.
@@ -145,20 +127,6 @@ object YtDlpDownloader {
         return findOutput(outDir, id)
     }
 
-    /** Captions only, run after the media is saved. Files land next to the temp media and are saved from there. */
-    fun fetchSubtitles(url: String, outDir: File) {
-        outDir.mkdirs()
-        val id = idFor(url)
-        val request = YoutubeDLRequest(url).apply {
-            addOption("--skip-download")
-            addOption("--write-subs")
-            addOption("--sub-langs", "ar.*,en.*")
-            addOption("--no-playlist")
-            addOption("-o", File(outDir, "$id.%(ext)s").absolutePath)
-        }
-        YtDlpLock.shared { YoutubeDL.getInstance().execute(request, "subs-$id") }
-    }
-
     /** Turns raw yt-dlp output into a message the user can act on, and decides whether to fall back. */
     private fun classify(raw: String): YtDlpException {
         val firstLine = raw.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().take(160)
@@ -177,7 +145,7 @@ object YtDlpDownloader {
             raw.contains("HTTP Error 429", true) ->
                 YtDlpException("الموقع يحد الطلبات مؤقتاً، جرّب بعد قليل")
             raw.contains("HTTP Error 403", true) ->
-                YtHttp403Exception("رفض الموقع الطلب (403)، سيتم تحديث محرك الاستخراج وإعادة المحاولة")
+                YtDlpException("رفض الموقع الطلب (403)، وقد يحتاج المحرك إلى تحديث")
             raw.contains("SSL", true) ->
                 YtDlpException("تعذّر التحقق من شهادة SSL للموقع")
             else -> YtDlpException("فشل الاستخراج: $firstLine")
@@ -187,7 +155,7 @@ object YtDlpDownloader {
     /** Picks the final file and skips fragments such as .f137.mp4 and partial files. */
     private fun findOutput(dir: File, id: String): File {
         val file = dir.listFiles { f ->
-            f.name.startsWith(id) &&
+            (f.name.startsWith("${id}_") || f.name.startsWith("$id.")) &&
                 f.extension.lowercase() in OUTPUT_EXT &&
                 !FRAGMENT_REGEX.containsMatchIn(f.name)
         }?.maxByOrNull { it.length() }

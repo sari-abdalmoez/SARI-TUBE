@@ -24,40 +24,19 @@ object MediaResolver {
             ?: return emptyList()
 
         val result = mutableListOf<Candidate>()
-
-        // DoodStream must be resolved to its actual media URL.
-        // Never send its embed page to the direct-file downloader.
         if (DoodResolver.isDoodUrl(pageUrl)) {
             DoodResolver.resolve(pageUrl)?.let { r ->
                 val id = DoodResolver.extractId(pageUrl) ?: "video"
-                result += Candidate(
-                    r.url,
-                    r.headers,
-                    "DoodStream",
-                    "doodstream_$id.mp4",
-                    "video/mp4"
-                )
+                result += Candidate(r.url, r.headers, "DoodStream", "doodstream_$id.mp4", "video/mp4")
             }
-            return result
         }
 
         val parsed = URL(pageUrl)
+        val origin = "${parsed.protocol}://${parsed.host}/"
         val last = parsed.path.substringAfterLast('/').substringBefore('?')
         val ext = last.substringAfterLast('.', "").lowercase()
-
-        // A webpage is not a direct media URL.
-        if (ext !in MEDIA_EXT) return emptyList()
-
-        val origin = "${parsed.protocol}://${parsed.host}/"
-        val name = sanitize(last)
-
-        result += Candidate(
-            pageUrl,
-            mapOf("Referer" to origin),
-            "مباشر",
-            name,
-            mimeFor(name)
-        )
+        val name = if (ext in MEDIA_EXT) sanitize(last) else sanitize(last.ifBlank { "video" }) + ".mp4"
+        result += Candidate(pageUrl, mapOf("Referer" to origin), "مباشر", name, mimeFor(name))
         return result
     }
 

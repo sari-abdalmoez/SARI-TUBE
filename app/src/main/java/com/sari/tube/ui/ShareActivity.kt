@@ -4,7 +4,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import com.sari.tube.engine.AppPrefs
 import com.sari.tube.engine.UrlParser
 import com.sari.tube.service.DownloadService
 
@@ -15,22 +14,8 @@ class ShareActivity : ComponentActivity() {
         val text = if (intent?.action == Intent.ACTION_SEND) intent?.getStringExtra(Intent.EXTRA_TEXT) else null
         val url = text?.let { UrlParser.firstHttpUrl(it) }
         if (url != null) {
-            if (!AppPrefs.allowMobileData(this) &&
-                !AppPrefs.isOnWifiOrEthernet(this)
-            ) {
-                Toast.makeText(
-                    this,
-                    "التنزيل مقيّد على Wi-Fi حسب الإعدادات",
-                    Toast.LENGTH_LONG
-                ).show()
-            } else {
-                DownloadService.start(this, url)
-                Toast.makeText(
-                    this,
-                    "بدأ التحميل — تابع الإشعارات",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
+            DownloadService.start(this, url)
+            Toast.makeText(this, "بدأ التحميل — تابع الإشعارات", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(this, "لا يوجد رابط صالح", Toast.LENGTH_SHORT).show()
         }
