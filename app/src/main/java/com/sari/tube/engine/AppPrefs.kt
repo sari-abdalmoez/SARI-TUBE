@@ -13,6 +13,14 @@ object AppPrefs {
         prefs(c).edit().putInt("theme_mode", value).apply()
     }
 
+    /** Last successfully submitted home-screen search, kept between app launches. */
+    fun lastSearch(c: Context): String =
+        prefs(c).getString("last_search", "").orEmpty()
+
+    fun setLastSearch(c: Context, value: String) {
+        prefs(c).edit().putString("last_search", value.trim()).apply()
+    }
+
     /** How many times the clipboard reminder was shown for this link. The reminder stops after two. */
     fun clipboardReminders(c: Context, url: String): Int =
         c.getSharedPreferences("sari_tube_prefs", Context.MODE_PRIVATE).getInt("clip_" + url.hashCode(), 0)

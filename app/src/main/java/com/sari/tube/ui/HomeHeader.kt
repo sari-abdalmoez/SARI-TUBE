@@ -44,7 +44,6 @@ import androidx.compose.ui.unit.sp
 
 private val BrandYellow = Color(0xFFFFC53D)
 private val BrandInk = Color(0xFF141414)
-private val HintGray = Color(0xFF8A8A8A)
 
 @Composable
 fun AppTitle(text: String = "SARI LOOP", modifier: Modifier = Modifier) {
@@ -106,16 +105,6 @@ fun SearchPill(
             Spacer(Modifier.width(12.dp))
 
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                if (value.isEmpty()) {
-                    Text(
-                        "ابحث عن فيلم أو مسلسل أو فيديو",
-                        color = HintGray,
-                        fontSize = 18.sp,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
                 BasicTextField(
                     value = value,
                     onValueChange = onValueChange,

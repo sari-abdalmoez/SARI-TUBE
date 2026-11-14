@@ -303,13 +303,13 @@ fun HomeScreen(
     onSearch: (String) -> Unit,
     onDownload: (String) -> Unit
 ) {
-    var text by rememberSaveable { mutableStateOf("") }
+    val ctx = LocalContext.current
+    var text by rememberSaveable { mutableStateOf(AppPrefs.lastSearch(ctx)) }
     val trimmed = text.trim()
     val isLink = UrlParser.firstHttpUrl(trimmed) != null ||
         DoodResolver.extractId(trimmed) != null
 
     val clipboard = LocalClipboardManager.current
-    val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var copiedLink by remember { mutableStateOf<String?>(null) }
     var dismissedLink by rememberSaveable { mutableStateOf<String?>(null) }
@@ -357,8 +357,8 @@ fun HomeScreen(
             onValueChange = { text = it },
             onSearch = {
                 if (trimmed.isNotEmpty()) {
+                    AppPrefs.setLastSearch(ctx, trimmed)
                     onSearch(trimmed)
-                    text = ""
                 }
             },
             onDownloadLink = {
