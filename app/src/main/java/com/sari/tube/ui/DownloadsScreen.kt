@@ -1,5 +1,24 @@
 package com.sari.tube.ui
 
+import androidx.compose.material3.MaterialTheme
+import coil.compose.AsyncImage
+
+import androidx.compose.material.icons.filled.Refresh
+
+import androidx.compose.runtime.setValue
+
+import androidx.compose.runtime.getValue
+
+import androidx.compose.runtime.mutableStateOf
+
+import androidx.compose.ui.window.DialogProperties
+
+import androidx.compose.ui.window.Dialog
+
+import androidx.compose.foundation.combinedClickable
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -7,39 +26,25 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -48,146 +53,588 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sari.tube.engine.ActiveDownload
+import com.sari.tube.engine.ActiveDownloads
+import com.sari.tube.engine.DlState
+import com.sari.tube.service.DownloadService
 import com.sari.tube.storage.DownloadRecord
 import com.sari.tube.storage.HistoryStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
-/** Files this app has downloaded: thumbnail, name and duration. */
+
 @Composable
 fun DownloadsScreen(onBack: () -> Unit) {
-    val ctx = LocalContext.current
-    var records by remember { mutableStateOf(HistoryStore.all(ctx)) }
+    PlayScreen(onBack = onBack)
+}
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+@Composable
+fun PlayScreen(onBack: () -> Unit) {
+    var playing by remember { mutableStateOf<DownloadRecord?>(null) }
+    playing?.let { rec ->
+        Dialog(
+            onDismissRequest = { playing = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            InAppPlayer(uri = rec.uri, title = rec.name, onClose = { playing = null })
+        }
+    }
+    val context = LocalContext.current
+
+    val activeMap by ActiveDownloads.items.collectAsState()
+    val activeItems = remember(activeMap) {
+        activeMap.values.sortedBy { it.id }
+    }
+    val activeIds = remember(activeItems) {
+        activeItems.map { it.id }.toSet()
+    }
+
+    var records by remember {
+        mutableStateOf(HistoryStore.all(context))
+    }
+    var searchVisible by rememberSaveable {
+        mutableStateOf(false)
+    }
+    // Not saveable on purpose: a Set<String> cannot be restored by rememberSaveable.
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var query by rememberSaveable {
+        mutableStateOf("")
+    }
+
+    // Refresh completed history only when the active download IDs change,
+    // not on every progress update.
+    LaunchedEffect(activeIds) {
+        records = withContext(Dispatchers.IO) {
+            HistoryStore.all(context)
+        }
+    }
+
+    val filteredActive = remember(activeItems, query) {
+        activeItems.filter {
+            it.title.contains(query.trim(), ignoreCase = true)
+        }
+    }
+    val filteredRecords = remember(records, query) {
+        records.filter {
+            it.name.contains(query.trim(), ignoreCase = true)
+        }.sortedByDescending { it.finishedAt }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "رجوع", tint = MaterialTheme.colorScheme.onBackground)
+                Icon(
+                    Icons.Filled.ArrowBack,
+                    contentDescription = "رجوع",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
             }
-            Text(
-                "الملفات المنزّلة",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
+
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "مكتبة التشغيل",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 21.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "${activeItems.size} نشط • ${records.size} مكتمل",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp
+                )
+            }
+
+            IconButton(
+                onClick = {
+                    searchVisible = !searchVisible
+                    if (!searchVisible) query = ""
+                }
+            ) {
+                Icon(
+                    if (searchVisible) Icons.Filled.Close else Icons.Filled.Search,
+                    contentDescription = "بحث",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+
+        if (selectedIds.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { selectedIds = emptySet() }) {
+                    Icon(Icons.Filled.Close, contentDescription = "إلغاء التحديد", tint = MaterialTheme.colorScheme.onSurface)
+                }
+                Text(
+                    text = "${selectedIds.size} عنصر",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f).padding(start = 6.dp)
+                )
+                TextButton(onClick = {
+                    selectedIds = if (selectedIds.size == filteredRecords.size) emptySet()
+                    else filteredRecords.map { it.id }.toSet()
+                }) {
+                    Text(
+                        if (selectedIds.size == filteredRecords.size) "إلغاء الكل" else "تحديد الكل",
+                        color = Color(0xFFFFC53D)
+                    )
+                }
+            }
+        }
+
+        if (searchVisible) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                singleLine = true,
+                placeholder = { Text("ابحث عن ملف أو تنزيل...") },
+                shape = RoundedCornerShape(15.dp)
             )
         }
 
-        ActiveDownloadsSection()
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(
+                start = 14.dp,
+                end = 14.dp,
+                top = 8.dp,
+                bottom = 24.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (filteredActive.isNotEmpty()) {
+                item(key = "active-section") {
+                    SectionTitle(
+                        title = "التنزيلات النشطة",
+                        count = filteredActive.size
+                    )
+                }
 
-        if (records.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("لا توجد ملفات منزّلة بعد", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else {
-            LazyColumn(
-                Modifier.weight(1f),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(records, key = { it.id }) { rec ->
-                    DownloadRow(
-                        rec = rec,
-                        onOpen = { openRecord(ctx, rec) },
+                items(
+                    items = filteredActive,
+                    key = { "active-${it.id}" }
+                ) { item ->
+                    ActiveDownloadCard(
+                        item = item,
+                        onRetry = { retryDownload(context, item.id) },
+                        onCancel = {
+                            runCatching {
+                                DownloadService.cancel(context, item.id)
+                            }
+                        },
                         onRemove = {
-                            HistoryStore.remove(ctx, rec.id)
-                            records = HistoryStore.all(ctx)
+                            ActiveDownloads.remove(item.id)
+                        }
+                    )
+                }
+            }
+
+            item(key = "history-section") {
+                SectionTitle(
+                    title = "تم التنزيل",
+                    count = filteredRecords.size
+                )
+            }
+
+            if (filteredRecords.isEmpty()) {
+                item(key = "history-empty") {
+                    EmptyPlayState(
+                        message = if (query.isBlank()) {
+                            "لا توجد ملفات مكتملة حتى الآن"
+                        } else {
+                            "لا توجد نتائج مطابقة"
+                        }
+                    )
+                }
+            } else {
+                items(
+                    items = filteredRecords,
+                    key = { "history-${it.id}" }
+                ) { record ->
+                    CompletedDownloadCard(
+                        record = record,
+                        selected = record.id in selectedIds,
+                        onLongPress = { selectedIds = selectedIds.toggle(record.id) },
+                        onOpen = {
+                            if (selectedIds.isNotEmpty()) selectedIds = selectedIds.toggle(record.id)
+                            else playing = record
+                        },
+                        onRemove = {
+                            HistoryStore.remove(context, record.id)
+                            records = records.filterNot { it.id == record.id }
                         }
                     )
                 }
             }
         }
+
+        if (selectedIds.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xFFFFC53D))
+                    .clickable {
+                        val chosen = filteredRecords.filter { it.id in selectedIds }
+                        chosen.forEach { rec ->
+                            // Removes the file itself when the app owns it; otherwise only the list entry.
+                            runCatching { context.contentResolver.delete(Uri.parse(rec.uri), null, null) }
+                            HistoryStore.remove(context, rec.id)
+                        }
+                        records = records.filterNot { r -> chosen.any { it.id == r.id } }
+                        Toast.makeText(context, "تم حذف ${chosen.size} عنصر", Toast.LENGTH_SHORT).show()
+                        selectedIds = emptySet()
+                    }
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("حذف", color = Color(0xFF141414), fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            }
+        }
+    }
+}
+
+/** Adds or removes an id from a selection set. */
+private fun Set<String>.toggle(id: String): Set<String> = if (id in this) this - id else this + id
+
+@Composable
+private fun SectionTitle(
+    title: String,
+    count: Int
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = count.toString(),
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
 @Composable
-private fun DownloadRow(rec: DownloadRecord, onOpen: () -> Unit, onRemove: () -> Unit) {
-    // Decoded off the main thread. Thumbnails are small (240 px), so memory stays low.
-    val thumb by produceState<ImageBitmap?>(initialValue = null, rec.thumbPath) {
-        value = rec.thumbPath?.let { path ->
-            withContext(Dispatchers.IO) { BitmapFactory.decodeFile(path)?.asImageBitmap() }
+private fun ActiveDownloadCard(
+    item: ActiveDownload,
+    onCancel: () -> Unit,
+    onRemove: () -> Unit,
+    onRetry: () -> Unit = {}
+) {
+    val failed = item.state == DlState.FAILED
+    val queued = item.state == DlState.QUEUED
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(17.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(13.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(43.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                val thumb = item.thumbnail
+                if (thumb != null) {
+                    AsyncImage(
+                        model = thumb,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(25.dp)
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 11.dp)
+            ) {
+                Text(
+                    text = item.title,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = when {
+                        failed -> "فشل التحميل"
+                        queued -> "في قائمة الانتظار"
+                        else -> "جارٍ التحميل"
+                    },
+                    color = when {
+                        failed -> MaterialTheme.colorScheme.error
+                        queued -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> MaterialTheme.colorScheme.primary
+                    },
+                    fontSize = 11.sp
+                )
+            }
+
+            if (failed) {
+                IconButton(onClick = onRetry) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "إعادة المحاولة", tint = MaterialTheme.colorScheme.primary)
+                }
+                IconButton(onClick = onRemove) {
+                    Icon(Icons.Filled.Close, contentDescription = "إزالة", tint = MaterialTheme.colorScheme.error)
+                }
+            } else {
+                IconButton(onClick = onCancel) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "إلغاء التحميل",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        if (!failed) {
+            if (item.progress in 0..100) {
+                LinearProgressIndicator(
+                    progress = item.progress.coerceIn(0, 100) / 100f,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(10.dp)),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.outline
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(10.dp)),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.outline
+                )
+            }
+        }
+
+        val details = when {
+            failed -> item.message.ifBlank { "تعذر إكمال التنزيل" }
+            queued -> "سيبدأ تلقائياً عند توفر مكان"
+            item.totalBytes > 0L ->
+                "${formatBytes(item.downloadedBytes)} / ${formatBytes(item.totalBytes)} • ${formatBytes(item.speedBytesPerSec)}/ث"
+            item.message.isNotBlank() -> item.message
+            else -> "جارٍ تجهيز الملف..."
+        }
+
+        Text(
+            text = details,
+            color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 7.dp)
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CompletedDownloadCard(
+    record: DownloadRecord,
+    selected: Boolean = false,
+    onLongPress: () -> Unit = {},
+    onOpen: () -> Unit,
+    onRemove: () -> Unit
+) {
+    val thumbnail by produceState<ImageBitmap?>(
+        initialValue = null,
+        record.thumbPath
+    ) {
+        value = record.thumbPath?.let { path ->
+            withContext(Dispatchers.IO) {
+                BitmapFactory.decodeFile(path)?.asImageBitmap()
+            }
         }
     }
 
     Row(
-        Modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .clip(RoundedCornerShape(17.dp))
+            .background(if (selected) Color(0x33FFC53D) else MaterialTheme.colorScheme.surface)
+            .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            Modifier
-                .size(96.dp, 60.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.outline),
+            modifier = Modifier
+                .size(91.dp, 65.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
-            val img = thumb
-            if (img != null) {
+            if (thumbnail != null) {
                 Image(
-                    bitmap = img,
+                    bitmap = thumbnail!!,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(29.dp)
+                )
             }
         }
 
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 11.dp)
+        ) {
             Text(
-                rec.name,
+                text = record.name,
                 color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
             Text(
-                "${formatDuration(rec.durationMs)}  •  ${formatSize(rec.sizeBytes)}",
+                text = "${formatDuration(record.durationMs)} • ${formatBytes(record.sizeBytes)}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp
+                fontSize = 11.sp
             )
         }
 
-        IconButton(onClick = onOpen) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = "فتح", tint = MaterialTheme.colorScheme.primary)
-        }
-        IconButton(onClick = onRemove) {
-            Icon(Icons.Filled.Delete, contentDescription = "إزالة من القائمة", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun EmptyPlayState(message: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 38.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                PlayLibrary,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(44.dp)
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = message,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp
+            )
         }
     }
 }
 
-private fun openRecord(ctx: Context, rec: DownloadRecord) {
+private fun retryDownload(context: Context, id: Int) {
+    val req = com.sari.tube.engine.requestOf(id) ?: return
+    com.sari.tube.engine.ActiveDownloads.remove(id)
+    com.sari.tube.service.DownloadService.start(context, req.input, req.selector, req.audioOnly)
+}
+
+private fun openDownload(context: Context, record: DownloadRecord) {
     val intent = Intent(Intent.ACTION_VIEW)
-        .setDataAndType(Uri.parse(rec.uri), rec.mime)
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        .setDataAndType(Uri.parse(record.uri), record.mime)
+        .addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                Intent.FLAG_ACTIVITY_NEW_TASK
+        )
+
     try {
-        ctx.startActivity(intent)
-    } catch (e: ActivityNotFoundException) {
-        Toast.makeText(ctx, "لا يوجد تطبيق لفتح هذا الملف", Toast.LENGTH_SHORT).show()
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(
+            context,
+            "لا يوجد تطبيق مناسب لفتح هذا الملف",
+            Toast.LENGTH_SHORT
+        ).show()
+    } catch (_: Exception) {
+        Toast.makeText(
+            context,
+            "تعذر فتح الملف",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 }
 
 private fun formatDuration(ms: Long): String {
     val total = ms / 1000
-    val h = total / 3600
-    val m = (total % 3600) / 60
-    val s = total % 60
-    return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s)
-    else String.format(Locale.US, "%d:%02d", m, s)
+    val hours = total / 3600
+    val minutes = (total % 3600) / 60
+    val seconds = total % 60
+
+    return if (hours > 0) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%d:%02d", minutes, seconds)
+    }
 }
 
-private fun formatSize(bytes: Long): String = when {
-    bytes >= 1024L * 1024L -> String.format(Locale.US, "%.1f MB", bytes / 1048576.0)
-    bytes >= 1024L -> String.format(Locale.US, "%.0f KB", bytes / 1024.0)
-    else -> "$bytes B"
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024L) return "$bytes B"
+
+    var value = bytes.toDouble()
+    val units = arrayOf("KB", "MB", "GB", "TB")
+    var index = -1
+
+    do {
+        value /= 1024.0
+        index++
+    } while (value >= 1024.0 && index < units.lastIndex)
+
+    return String.format(Locale.US, "%.1f %s", value, units[index])
 }

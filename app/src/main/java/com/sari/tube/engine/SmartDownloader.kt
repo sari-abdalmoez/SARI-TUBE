@@ -174,6 +174,7 @@ class SmartDownloader(
         try {
             conn.connect()
             if (conn.responseCode != 206) throw RangeUnsupportedException()
+            checkMediaType(conn)
             val cr = conn.getHeaderField("Content-Range")
             if (cr != null && !cr.startsWith("bytes $from-")) throw IOException("Unexpected Content-Range: $cr")
             conn.inputStream.use { input ->
@@ -197,10 +198,18 @@ class SmartDownloader(
                 val conn = open(url, null)
                 try {
                     conn.connect()
-                    if (conn.responseCode !in 200..299) throw IOException("HTTP ${conn.responseCode}")
+                    if (conn.responseCode !in 200..299) {
+                        throw IOException("HTTP ${conn.responseCode}")
+                    }
+                    checkMediaType(conn)
                     conn.inputStream.use { input ->
+                        val prefix = readPrefix(input)
+                        checkMediaPreview(prefix)
                         FileOutputStream(tmp).use { out ->
-                            pump(input, out, { control.isCancelled }) { ticker.tick(tmp.length()) }
+                            if (prefix.isNotEmpty()) out.write(prefix)
+                            pump(input, out, { control.isCancelled }) {
+                                ticker.tick(tmp.length())
+                            }
                         }
                     }
                 } finally {
@@ -209,9 +218,13 @@ class SmartDownloader(
                 return tmp
             } catch (e: DownloadCancelledException) {
                 throw e
+            } catch (e: InvalidMediaException) {
+                throw e
             } catch (e: IOException) {
                 attempt++
-                if (attempt > config.maxRetries) throw IOException("Download failed after retries: ${e.message}", e)
+                if (attempt > config.maxRetries) {
+                    throw IOException("Download failed after retries: ${e.message}", e)
+                }
                 Thread.sleep(backoff(attempt))
             }
         }
@@ -223,21 +236,42 @@ class SmartDownloader(
         var attempt = 0
         while (true) {
             try {
-                val conn = open(url, "bytes=0-0")
+                val conn = open(url, "bytes=0-1023")
                 try {
                     conn.connect()
-                    checkMedia(conn)
-                    return when (conn.responseCode) {
-                        206 -> Probe(parseTotal(conn.getHeaderField("Content-Range")), true, conn.getHeaderField("ETag"))
-                        200 -> Probe(conn.contentLengthLong, false, conn.getHeaderField("ETag"))
-                        else -> throw IOException("HTTP ${conn.responseCode}")
+                    val code = conn.responseCode
+                    if (code != 200 && code != 206) {
+                        throw IOException("HTTP $code")
+                    }
+
+                    checkMediaType(conn)
+                    conn.inputStream.use { input ->
+                        checkMediaPreview(readPrefix(input))
+                    }
+
+                    return if (code == 206) {
+                        Probe(
+                            parseTotal(conn.getHeaderField("Content-Range")),
+                            true,
+                            conn.getHeaderField("ETag")
+                        )
+                    } else {
+                        Probe(
+                            conn.contentLengthLong,
+                            false,
+                            conn.getHeaderField("ETag")
+                        )
                     }
                 } finally {
                     conn.disconnect()
                 }
+            } catch (e: InvalidMediaException) {
+                throw e
             } catch (e: IOException) {
                 attempt++
-                if (attempt > config.maxRetries) throw IOException("Cannot reach file: ${e.message}", e)
+                if (attempt > config.maxRetries) {
+                    throw IOException("Cannot reach file: ${e.message}", e)
+                }
                 Thread.sleep(backoff(attempt))
             }
         }
@@ -270,10 +304,53 @@ class SmartDownloader(
     private fun parseTotal(contentRange: String?): Long =
         contentRange?.substringAfterLast('/')?.toLongOrNull() ?: -1L
 
-    private fun checkMedia(conn: HttpURLConnection) {
-        val ct = conn.contentType?.lowercase().orEmpty()
-        if (ct.startsWith("text/html") || ct.startsWith("application/json")) {
-            throw InvalidMediaException("الرابط يعرض صفحة وليس ملف فيديو")
+    private fun checkMediaType(conn: HttpURLConnection) {
+        val ct = conn.contentType
+            ?.substringBefore(';')
+            ?.trim()
+            ?.lowercase()
+            .orEmpty()
+
+        if (
+            ct.startsWith("text/") ||
+            ct.contains("html") ||
+            ct.contains("json") ||
+            ct.contains("xml") ||
+            ct.contains("javascript")
+        ) {
+            throw InvalidMediaException("الرابط يعرض صفحة ويب وليس ملف وسائط")
+        }
+    }
+
+    private fun readPrefix(input: InputStream): ByteArray {
+        val buffer = ByteArray(1024)
+        var count = 0
+        while (count < buffer.size) {
+            val n = input.read(buffer, count, buffer.size - count)
+            if (n <= 0) break
+            count += n
+        }
+        return buffer.copyOf(count)
+    }
+
+    private fun checkMediaPreview(prefix: ByteArray) {
+        val preview = String(prefix, Charsets.UTF_8)
+            .trimStart('\uFEFF', ' ', '\n', '\r', '\t')
+            .lowercase()
+
+        if (
+            preview.startsWith("<!doctype html") ||
+            preview.startsWith("<html") ||
+            preview.startsWith("<head") ||
+            preview.startsWith("<body") ||
+            preview.startsWith("<!--") ||
+            preview.startsWith("<?xml") ||
+            preview.startsWith("{") ||
+            preview.startsWith("[") ||
+            preview.startsWith("access denied") ||
+            preview.startsWith("forbidden")
+        ) {
+            throw InvalidMediaException("استجابة الموقع صفحة أو رسالة خطأ وليست ملف فيديو")
         }
     }
 

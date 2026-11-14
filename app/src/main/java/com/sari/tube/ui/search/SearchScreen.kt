@@ -1,10 +1,21 @@
 package com.sari.tube.ui.search
 
+import androidx.compose.runtime.snapshotFlow
+
+import androidx.compose.foundation.lazy.rememberLazyListState
+
+import androidx.activity.compose.BackHandler
+
 import androidx.media3.ui.PlayerView
 
 import androidx.media3.exoplayer.ExoPlayer
 
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import com.sari.tube.ui.InAppPlayer
+import com.sari.tube.ui.player.StreamPlayer
+import kotlinx.coroutines.CancellationException
 
 import androidx.compose.ui.viewinterop.AndroidView
 
@@ -13,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.saveable.rememberSaveable
 
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 
 import androidx.activity.result.contract.ActivityResultContracts
 
@@ -21,10 +33,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import android.content.Intent
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -35,6 +47,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.runtime.key
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -65,7 +78,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.sari.tube.engine.UnifiedMediaItem
 import com.sari.tube.engine.VideoItem
+import com.sari.tube.ui.media.MediaDetailPanel
+import com.sari.tube.ui.media.MediaResultsPanel
+import com.sari.tube.ui.media.WatchResultsPanel
 import com.sari.tube.ui.DownloadArrow
 import com.sari.tube.ui.FormatSheet
 import androidx.compose.runtime.remember
@@ -83,6 +100,22 @@ fun SearchScreen(
     val tabs = SearchTab.entries
     val selectedIndex = tabs.indexOf(vm.tab)
     var pick by remember { mutableStateOf<VideoItem?>(null) }
+    val context = LocalContext.current
+
+
+    // Back closes the open player first, and only then leaves the search screen.
+    // Back goes one step at a time: player -> watch results -> details -> results list.
+    // Handlers declared later take priority, so the player is declared last.
+    BackHandler(enabled = vm.openMedia != null) { vm.openMediaItem(null) }
+    BackHandler(enabled = vm.watchQuery != null) { vm.setWatch(null) }
+    BackHandler(enabled = vm.playItem != null) { vm.playVideo(null) }
+
+    val listState = rememberLazyListState()
+    val readyCount = (vm.state as? SearchUiState.Ready)?.items?.size ?: 0
+    LaunchedEffect(listState, readyCount) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .collect { last -> if (readyCount > 0 && last >= readyCount - 2) vm.loadMore() }
+    }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(
@@ -112,28 +145,65 @@ fun SearchScreen(
             selectedTabIndex = selectedIndex,
             edgePadding = 12.dp,
             containerColor = MaterialTheme.colorScheme.background,
-            contentColor = MaterialTheme.colorScheme.primary
+            contentColor = MaterialTheme.colorScheme.onSurface
         ) {
             tabs.forEachIndexed { i, t ->
                 Tab(
                     selected = i == selectedIndex,
-                    onClick = { vm.onTabSelected(t) },
+                    onClick = {
+                        vm.openMediaItem(null)
+                        vm.setWatch(null)
+                        vm.onTabSelected(t)
+                    },
                     text = { Text(t.label, fontWeight = FontWeight.SemiBold) }
                 )
             }
         }
 
-        if (vm.tab == SearchTab.LOCAL) {
-            LocalVideoPanel()
+        val openItem = vm.playItem
+        val watch = vm.watchQuery
+        val media = vm.openMedia
+        val panelModifier = Modifier.fillMaxWidth().weight(1f)
+        if (openItem != null) {
+            key(openItem.id) {
+                StreamPlayer(
+                    pageUrl = openItem.url,
+                    title = openItem.title,
+                    onBack = { vm.playVideo(null) },
+                    modifier = panelModifier
+                )
+            }
+        } else if (watch != null) {
+            WatchResultsPanel(
+                query = watch,
+                onBack = { vm.setWatch(null) },
+                onPlay = { vm.playVideo(it) },
+                modifier = panelModifier
+            )
+        } else if (media != null) {
+            MediaDetailPanel(
+                item = media,
+                onBack = { vm.openMediaItem(null) },
+                onWatch = { query, _ -> vm.setWatch(query) },
+                modifier = panelModifier
+            )
+        } else if (vm.tab == SearchTab.LOCAL) {
+            Box(panelModifier) { LocalVideoPanel() }
+        } else if (vm.tab == SearchTab.MOVIES) {
+            MediaResultsPanel(
+                query = vm.query,
+                onOpen = { vm.openMediaItem(it) },
+                modifier = panelModifier
+            )
         } else when (val s = vm.state) {
-            SearchUiState.Idle -> Spacer(Modifier.weight(1f))
+            SearchUiState.Idle -> Spacer(Modifier.fillMaxSize())
 
-            SearchUiState.Loading -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            SearchUiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             }
 
             is SearchUiState.Failed -> Column(
-                Modifier.weight(1f).fillMaxWidth().padding(24.dp),
+                Modifier.fillMaxSize().padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
@@ -154,16 +224,31 @@ fun SearchScreen(
                         SearchTab.VIDEOS -> s.items.filterNot { SearchViewModel.isSong(it) }
                         else -> s.items
                     }
-                    if (visible.isEmpty()) {
-                        CenterMessage("لا توجد نتائج في هذا التبويب")
+                    val shown = if (visible.isEmpty()) s.items else visible
+                    if (shown.isEmpty()) {
+                        CenterMessage("لا توجد نتائج")
                     } else {
                         LazyColumn(
-                            Modifier.weight(1f),
+                            state = listState,
                             contentPadding = PaddingValues(12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            items(visible, key = { it.id }) { item ->
-                                VideoCard(item = item, onDownload = { pick = item })
+                            if (vm.loadingMore) {
+                                item {
+                                    Box(
+                                        Modifier.fillMaxWidth().padding(16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                            items(shown, key = { it.id }) { item ->
+                                VideoCard(
+                                    item = item,
+                                    onPlay = { vm.playVideo(item) },
+                                    onDownload = { pick = item }
+                                )
                             }
                         }
                     }
@@ -184,12 +269,13 @@ fun SearchScreen(
 }
 
 @Composable
-private fun VideoCard(item: VideoItem, onDownload: () -> Unit) {
+private fun VideoCard(item: VideoItem, onPlay: () -> Unit, onDownload: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onPlay)
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -253,8 +339,8 @@ private fun VideoCard(item: VideoItem, onDownload: () -> Unit) {
 }
 
 @Composable
-private fun ColumnScope.CenterMessage(text: String) {
-    Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+private fun CenterMessage(text: String) {
+    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
     }
 }
@@ -293,50 +379,18 @@ private fun LocalVideoPanel() {
         }
     }
 
-    val player: ExoPlayer? = remember(selectedUri) {
-        selectedUri?.let { uri ->
-            ExoPlayer.Builder(context).build().apply {
-                setMediaItem(MediaItem.fromUri(uri))
-                prepare()
-                playWhenReady = true
-            }
-        }
-    }
-
-    DisposableEffect(player) {
-        onDispose { player?.release() }
-    }
-
-    Column(
-        Modifier.fillMaxSize().padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Button(onClick = { picker.launch(arrayOf("video/*")) }) {
-            Text("اختيار فيديو من الهاتف")
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        if (player != null) {
-            AndroidView(
-                factory = { viewContext ->
-                    PlayerView(viewContext).apply {
-                        useController = true
-                        this.player = player
-                    }
-                },
-                update = { it.player = player },
-                modifier = Modifier.fillMaxWidth().weight(1f)
-            )
-        } else {
-            Box(
-                Modifier.fillMaxWidth().weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    " ",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+    val chosen = selectedUri
+    if (chosen != null) {
+        // Same player and controls as the downloads screen. Back returns to the picker.
+        InAppPlayer(uri = chosen, title = "فيديو من الهاتف", onClose = { selectedUri = null })
+    } else {
+        Column(
+            Modifier.fillMaxSize().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Button(onClick = { picker.launch(arrayOf("video/*")) }) {
+                Text("اختيار فيديو من الهاتف")
             }
         }
     }

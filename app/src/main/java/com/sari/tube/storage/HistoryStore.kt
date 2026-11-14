@@ -28,9 +28,11 @@ object HistoryStore {
     fun all(context: Context): List<DownloadRecord> = synchronized(lock) { read(context) }
 
     /** Reads duration and a video frame from the finished file, then records it. */
-    fun add(context: Context, src: File, name: String, mime: String, uri: String): DownloadRecord {
+    fun add(context: Context, src: File, name: String, mime: String, uri: String, cover: File? = null): DownloadRecord {
         val id = UUID.randomUUID().toString()
-        val (duration, thumb) = probe(context, src, id)
+        val (duration, probedThumb) = probe(context, src, id)
+        // A cover downloaded with the media (song art, video poster) is preferred over a generated frame.
+        val thumb = cover?.let { copyCover(context, it, id) } ?: probedThumb
         val rec = DownloadRecord(id, name, mime, uri, src.length(), duration, thumb, System.currentTimeMillis())
         synchronized(lock) {
             val list = read(context).toMutableList()
@@ -48,6 +50,14 @@ object HistoryStore {
             write(context, list.filterNot { it.id == id })
         }
     }
+
+    private fun copyCover(context: Context, cover: File, id: String): String? = runCatching {
+        if (!cover.exists()) return@runCatching null
+        val dir = File(context.filesDir, "thumbs").apply { mkdirs() }
+        val target = File(dir, "$id.jpg")
+        cover.copyTo(target, overwrite = true)
+        target.absolutePath
+    }.getOrNull()
 
     private fun probe(context: Context, src: File, id: String): Pair<Long, String?> {
         val mmr = MediaMetadataRetriever()

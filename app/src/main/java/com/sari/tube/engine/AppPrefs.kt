@@ -1,9 +1,27 @@
 package com.sari.tube.engine
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 
 /** User settings for downloads, stored in this app's private SharedPreferences. */
 object AppPrefs {
+    /** 0 = follow the phone, 1 = dark, 2 = light. */
+    fun themeMode(c: Context): Int = prefs(c).getInt("theme_mode", 0)
+
+    fun setThemeMode(c: Context, value: Int) {
+        prefs(c).edit().putInt("theme_mode", value).apply()
+    }
+
+    /** How many times the clipboard reminder was shown for this link. The reminder stops after two. */
+    fun clipboardReminders(c: Context, url: String): Int =
+        c.getSharedPreferences("sari_tube_prefs", Context.MODE_PRIVATE).getInt("clip_" + url.hashCode(), 0)
+
+    fun countClipboardReminder(c: Context, url: String) {
+        c.getSharedPreferences("sari_tube_prefs", Context.MODE_PRIVATE).edit()
+            .putInt("clip_" + url.hashCode(), clipboardReminders(c, url) + 1).apply()
+    }
+
     private const val NAME = "sari_tube_prefs"
 
     private fun prefs(c: Context) = c.getSharedPreferences(NAME, Context.MODE_PRIVATE)
@@ -21,6 +39,25 @@ object AppPrefs {
     fun setSpeedKbps(c: Context, value: Int) {
         prefs(c).edit().putInt("speed_kbps", value.coerceAtLeast(0)).apply()
         applyRate(c)
+    }
+
+    /** Whether downloads may start over mobile data. */
+    fun allowMobileData(c: Context): Boolean =
+        prefs(c).getBoolean("mobile_data", true)
+
+    fun setAllowMobileData(c: Context, value: Boolean) {
+        prefs(c).edit().putBoolean("mobile_data", value).apply()
+    }
+
+    /** True only when the active default network is Wi-Fi or Ethernet. */
+    fun isOnWifiOrEthernet(c: Context): Boolean {
+        val cm = c.getSystemService(ConnectivityManager::class.java)
+            ?: return false
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+            ?: return false
+
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
     }
 
     /** Pushes the saved speed cap into the downloader. Call at app start. */

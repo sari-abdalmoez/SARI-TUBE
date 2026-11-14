@@ -1,5 +1,35 @@
 package com.sari.tube.ui
 
+import androidx.compose.material3.lightColorScheme
+import android.app.Activity
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+
+import androidx.compose.foundation.isSystemInDarkTheme
+
+import com.sari.tube.engine.LinkInfo
+
+import androidx.compose.ui.platform.LocalContext
+
+import androidx.compose.ui.graphics.graphicsLayer
+
+import androidx.compose.animation.core.animateFloatAsState
+
+import kotlinx.coroutines.delay
+
+import com.sari.tube.engine.MediaFormats
+
+import androidx.lifecycle.LifecycleEventObserver
+
+import androidx.lifecycle.Lifecycle
+
+import androidx.compose.ui.platform.LocalLifecycleOwner
+
+import androidx.compose.runtime.DisposableEffect
+
+import androidx.activity.compose.BackHandler
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -8,6 +38,12 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.animateColor
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -63,6 +99,8 @@ import com.sari.tube.ui.search.SearchViewModel
 private const val TAB_TOOLS = 0
 private const val TAB_PLAY = 1
 private const val TAB_DOWNLOAD = 2
+private const val TOOLS_GRID = 0
+private const val TOOLS_DOWNLOAD = 1
 
 class MainActivity : ComponentActivity() {
     private val askNotifications =
@@ -70,13 +108,30 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Asked once at launch, so shared links that download in the background can show their progress.
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         AppPrefs.applyRate(this)
+        ThemeMode.load(this)
         setContent {
             SariTheme {
                 var tab by rememberSaveable { mutableStateOf(TAB_DOWNLOAD) }
                 var searching by rememberSaveable { mutableStateOf(false) }
                 var pendingQuery by rememberSaveable { mutableStateOf("") }
                 var sheetUrl by rememberSaveable { mutableStateOf<String?>(null) }
+                var toolsPage by rememberSaveable { mutableStateOf(TOOLS_GRID) }
+
+                // Back goes one step: search -> home, tools subpage -> tools grid, other tabs -> home.
+                BackHandler(enabled = searching || tab != TAB_DOWNLOAD || toolsPage != TOOLS_GRID) {
+                    when {
+                        searching -> { searching = false }
+                        tab == TAB_TOOLS && toolsPage != TOOLS_GRID -> { toolsPage = TOOLS_GRID }
+                        else -> { tab = TAB_DOWNLOAD }
+                    }
+                }
 
                 Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -95,7 +150,16 @@ class MainActivity : ComponentActivity() {
                                     onDownload = { url, sel, aud -> startDownload(url, sel, aud) }
                                 )
                             }
-                            tab == TAB_TOOLS -> SettingsScreen(onBack = { tab = TAB_DOWNLOAD })
+                            tab == TAB_TOOLS -> when (toolsPage) {
+                                TOOLS_DOWNLOAD -> SettingsScreen(
+                                    onBack = { toolsPage = TOOLS_GRID }
+                                )
+                                else -> ToolsScreen(
+                                    onOpenDownloadSettings = {
+                                        toolsPage = TOOLS_DOWNLOAD
+                                    }
+                                )
+                            }
                             tab == TAB_PLAY -> DownloadsScreen(onBack = { tab = TAB_DOWNLOAD })
                             else -> HomeScreen(
                                 onSearch = { q ->
@@ -127,6 +191,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startDownload(url: String, selector: String = "bv*+ba/b", audio: Boolean = false) {
+        if (!AppPrefs.allowMobileData(this) &&
+            !AppPrefs.isOnWifiOrEthernet(this)
+        ) {
+            Toast.makeText(
+                this,
+                "التنزيل مقيّد على Wi-Fi حسب الإعدادات",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -139,8 +214,13 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun SariTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
+    val dark = when (ThemeMode.value) {
+        1 -> true
+        2 -> false
+        else -> isSystemInDarkTheme()
+    }
+    val scheme = if (dark) {
+        darkColorScheme(
             primary = Color(0xFFFFC53D),
             onPrimary = Color(0xFF141414),
             background = Color(0xFF0E0E10),
@@ -148,10 +228,34 @@ fun SariTheme(content: @Composable () -> Unit) {
             onBackground = Color(0xFFEDEDED),
             onSurface = Color(0xFFEDEDED),
             onSurfaceVariant = Color(0xFF9A9AA5),
-            outline = Color(0xFF2E2E36)
-        ),
-        content = content
-    )
+            surfaceVariant = Color(0xFF26262E),
+            outline = Color(0xFF2E2E36),
+            error = Color(0xFFFF7168)
+        )
+    } else {
+        lightColorScheme(
+            primary = Color(0xFFB7791F),
+            onPrimary = Color.White,
+            background = Color(0xFFF6F6F8),
+            surface = Color(0xFFFFFFFF),
+            onBackground = Color(0xFF15151A),
+            onSurface = Color(0xFF15151A),
+            onSurfaceVariant = Color(0xFF5E5E68),
+            surfaceVariant = Color(0xFFE6E6EC),
+            outline = Color(0xFFD0D0D8),
+            error = Color(0xFFC62828)
+        )
+    }
+    // Status and navigation bar icons must stay readable on the chosen theme.
+    val view = LocalView.current
+    SideEffect {
+        (view.context as? Activity)?.window?.let { w ->
+            val controller = WindowCompat.getInsetsController(w, view)
+            controller.isAppearanceLightStatusBars = !dark
+            controller.isAppearanceLightNavigationBars = !dark
+        }
+    }
+    MaterialTheme(colorScheme = scheme, content = content)
 }
 
 @Composable
@@ -159,25 +263,30 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
+            .background(MaterialTheme.colorScheme.background)
             .navigationBarsPadding()
             .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
         NavItem("الأدوات", ToolsGrid, selected == TAB_TOOLS) { onSelect(TAB_TOOLS) }
         NavItem("تشغيل", PlayLibrary, selected == TAB_PLAY) { onSelect(TAB_PLAY) }
-        NavItem("تنزيل", DownloadArrow, selected == TAB_DOWNLOAD) { onSelect(TAB_DOWNLOAD) }
     }
 }
 
 @Composable
 private fun NavItem(label: String, icon: ImageVector, active: Boolean, onClick: () -> Unit) {
-    val tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    val scale by animateFloatAsState(targetValue = if (active) 1.14f else 1f, label = "navScale")
+    val tint = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         Modifier.clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(24.dp))
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(24.dp).graphicsLayer { scaleX = scale; scaleY = scale }
+        )
         Spacer(Modifier.height(2.dp))
         Text(
             label,
@@ -194,85 +303,82 @@ fun HomeScreen(
     onDownload: (String) -> Unit
 ) {
     var text by rememberSaveable { mutableStateOf("") }
-    val clipboard = LocalClipboardManager.current
     val trimmed = text.trim()
-    val isLink = UrlParser.firstHttpUrl(trimmed) != null || DoodResolver.extractId(trimmed) != null
+    val isLink = UrlParser.firstHttpUrl(trimmed) != null ||
+        DoodResolver.extractId(trimmed) != null
 
-    Box(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().offset(y = (-48).dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    "SARI Loop",
-                    fontSize = 36.sp,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 2.sp
-                )
-                Spacer(Modifier.height(36.dp))
+    val clipboard = LocalClipboardManager.current
+    val ctx = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var copiedLink by remember { mutableStateOf<String?>(null) }
+    var dismissedLink by rememberSaveable { mutableStateOf<String?>(null) }
 
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    modifier = Modifier.fillMaxWidth(),
+    // Reads the clipboard when the app opens and whenever it returns to the foreground.
+    DisposableEffect(lifecycleOwner) {
+        fun readClipboard() {
+            val clip = clipboard.getText()?.text?.trim().orEmpty()
+            val link = clip.takeIf { UrlParser.firstHttpUrl(it) != null }
+            // The reminder appears at most twice for the same link.
+            copiedLink = link?.takeIf { AppPrefs.clipboardReminders(ctx, it) < 2 }
+            copiedLink?.let { AppPrefs.countClipboardReminder(ctx, it) }
+        }
+        readClipboard()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) readClipboard()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
-                    singleLine = true,
-                    shape = RoundedCornerShape(24.dp),
-                    trailingIcon = {
-                        androidx.compose.material3.TextButton(onClick = {
-                            clipboard.getText()?.text?.let { text = it }
-                        }) {
-                            Text("لصق", color = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                )
-            }
-            Spacer(Modifier.height(16.dp))
+    var linkInfo by remember { mutableStateOf<LinkInfo?>(null) }
+    LaunchedEffect(copiedLink) {
+        val l = copiedLink ?: return@LaunchedEffect
+        linkInfo = null
+        runCatching { MediaFormats.fetch(l) }
+        linkInfo = MediaFormats.info(l)
+    }
 
-            // Gradient yellow-to-orange action button. Its label and icon follow the input.
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .alpha(if (trimmed.isNotEmpty()) 1f else 0.4f)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(Brush.horizontalGradient(listOf(Color(0xFFFFC53D), Color(0xFFFF8A00))))
-                    .clickable(enabled = trimmed.isNotEmpty()) {
-                        if (isLink) onDownload(trimmed) else onSearch(trimmed)
-                        text = ""
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        if (isLink) DownloadArrow else Icons.Filled.Search,
-                        contentDescription = null,
-                        tint = Color(0xFF141414)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (isLink) "تنزيل" else "بحث",
-                        color = Color(0xFF141414),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
+    // Formats are read in the background once a link is complete, so the format sheet opens faster.
+    LaunchedEffect(trimmed) {
+        if (isLink) {
+            delay(600)
+            runCatching { MediaFormats.fetch(trimmed) }
+        }
+    }
+
+    Box(
+        Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        FloatingDecor(Modifier.fillMaxSize())
+        HomeHeader(
+            value = text,
+            onValueChange = { text = it },
+            onSearch = {
+                if (trimmed.isNotEmpty()) {
+                    onSearch(trimmed)
+                    text = ""
                 }
-            }
+            },
+            onDownloadLink = {
+                if (trimmed.isNotEmpty() && isLink) {
+                    onDownload(trimmed)
+                    text = ""
+                }
+            },
+            modifier = Modifier.fillMaxWidth().offset(y = (-28).dp)
+        )
 
-            Spacer(Modifier.height(24.dp))
-            Text(
-                "يظهر تقدم التحميل في الإشعارات.\nيُحفظ الفيديو في: Download/SARI TUBE",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+        val link = copiedLink
+        if (link != null && link != dismissedLink && link != trimmed) {
+            QuickLinkCard(
+                url = link,
+                title = linkInfo?.title,
+                thumbnail = linkInfo?.thumbnail,
+                onDownload = { onDownload(link) },
+                onDismiss = { dismissedLink = link },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp, vertical = 120.dp)
             )
         }
-
-
     }
 }
