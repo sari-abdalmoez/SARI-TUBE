@@ -1,5 +1,6 @@
 package com.sari.tube.ui
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -51,19 +52,19 @@ fun QuickLinkCard(
         modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(Color(0xFF1A1A1F))
+            .background(MaterialTheme.colorScheme.surface)
             .border(1.dp, Color(0x33FFC53D), shape)
             .padding(start = 6.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onDismiss) {
-            Icon(Icons.Filled.Close, contentDescription = "إخفاء", tint = Color(0xFF9A9AA5))
+            Icon(Icons.Filled.Close, contentDescription = "إخفاء", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Box(
             Modifier
                 .size(60.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .background(Color(0xFF292930)),
+                .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             if (thumbnail != null) {
@@ -74,20 +75,20 @@ fun QuickLinkCard(
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                Icon(DownloadArrow, contentDescription = null, tint = Color(0xFF9A9AA5), modifier = Modifier.size(26.dp))
+                Icon(DownloadArrow, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(26.dp))
             }
         }
         Column(Modifier.weight(1f).padding(horizontal = 10.dp), horizontalAlignment = Alignment.End) {
             Text(
                 title ?: "رابط منسوخ",
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(3.dp))
-            Text(hostOf(url), color = Color(0xFF9A9AA5), fontSize = 12.sp, maxLines = 1)
+            Text(hostOf(url), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1)
         }
         Row(
             Modifier

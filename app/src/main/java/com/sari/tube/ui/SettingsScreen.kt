@@ -17,7 +17,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.width
+import com.sari.tube.engine.MetadataKeys
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -123,6 +127,41 @@ fun SettingsScreen(onBack: () -> Unit) {
                     )
                 }
             }
+
+            Spacer(Modifier.height(16.dp))
+            SectionTitle("مفتاح TMDB للأفلام والمسلسلات")
+            var tmdbKey by remember { mutableStateOf(MetadataKeys.tmdb().orEmpty()) }
+            var tmdbSaved by remember { mutableStateOf(false) }
+            OutlinedTextField(
+                value = tmdbKey,
+                onValueChange = {
+                    tmdbKey = it
+                    tmdbSaved = false
+                },
+                singleLine = true,
+                label = { Text("مفتاح API") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(onClick = {
+                    MetadataKeys.setTmdb(ctx, tmdbKey)
+                    tmdbSaved = true
+                }) { Text("حفظ") }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    if (tmdbSaved) "تم الحفظ" else "",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 13.sp
+                )
+            }
+            Text(
+                "المفتاح مجاني من themoviedb.org ويُحفظ على هذا الجهاز فقط. بدونه تعمل خدمتا AniList وTVMaze فقط.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp
+            )
 
             Spacer(Modifier.height(12.dp))
             Text(

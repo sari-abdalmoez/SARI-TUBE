@@ -20,12 +20,14 @@ enum class SearchTab(val label: String) {
     ALL("الكل"),
     SONGS("أغاني"),
     VIDEOS("فيديو"),
+    MOVIES("أفلام ومسلسلات"),
     WEB("الويب"),
     TIKTOK("TikTok"),
     FACEBOOK("Facebook"),
     LOCAL("محلي");
 
-    val searchable: Boolean get() = this != LOCAL
+    /** Tabs that search YouTube or the web. Local files and films/series use their own panels. */
+    val searchable: Boolean get() = this != LOCAL && this != MOVIES
 }
 
 sealed interface SearchUiState {
@@ -65,7 +67,7 @@ class SearchViewModel : ViewModel() {
         query = value
         debounceJob?.cancel()
 
-        if (value.isBlank() || tab == SearchTab.LOCAL) {
+        if (value.isBlank() || !tab.searchable) {
             searchJob?.cancel()
             state = SearchUiState.Idle
             return
@@ -83,7 +85,7 @@ class SearchViewModel : ViewModel() {
         debounceJob?.cancel()
         searchJob?.cancel()
 
-        if (selected == SearchTab.LOCAL) {
+        if (!selected.searchable) {
             state = SearchUiState.Idle
         } else if (query.isNotBlank()) {
             submit()
@@ -192,7 +194,7 @@ class SearchViewModel : ViewModel() {
             SearchTab.WEB -> WebSearch.search(q)
             SearchTab.TIKTOK -> WebSearch.search(q, "tiktok")
             SearchTab.FACEBOOK -> WebSearch.search(q, "facebook")
-            SearchTab.LOCAL -> emptyList()
+            SearchTab.LOCAL, SearchTab.MOVIES -> emptyList()
         }
     }
 

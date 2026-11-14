@@ -44,10 +44,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val ToolsBg = Color(0xFF0E0E10)
-private val ToolsSurface = Color(0xFF1A1A1F)
-private val ToolsBrand = Color(0xFFFFC53D)
-private val ToolsMuted = Color(0xFF9A9AA5)
 
 private data class ToolCard(
     val title: String,
@@ -89,14 +85,14 @@ fun ToolsScreen(onOpenDownloadSettings: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(ToolsBg)
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp)
     ) {
         Text(
             "الأدوات",
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 26.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.End,
@@ -150,8 +146,8 @@ private fun ToolTile(card: ToolCard, modifier: Modifier) {
         modifier
             .height(150.dp)
             .clip(shape)
-            .border(1.dp, Color(0x33FFFFFF), shape)
-            .background(ToolsSurface)
+            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
+            .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = card.onClick)
             .padding(16.dp),
         verticalArrangement = Arrangement.SpaceBetween,
@@ -160,14 +156,14 @@ private fun ToolTile(card: ToolCard, modifier: Modifier) {
         Icon(
             imageVector = card.icon,
             contentDescription = card.title,
-            tint = ToolsBrand,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(32.dp)
         )
 
         Column(horizontalAlignment = Alignment.End) {
             Text(
                 card.title,
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.End
@@ -175,7 +171,7 @@ private fun ToolTile(card: ToolCard, modifier: Modifier) {
             Spacer(Modifier.height(4.dp))
             Text(
                 card.subtitle,
-                color = ToolsMuted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 textAlign = TextAlign.End,
                 maxLines = 2

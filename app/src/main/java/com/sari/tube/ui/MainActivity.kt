@@ -1,6 +1,10 @@
 package com.sari.tube.ui
 
 import androidx.compose.material3.lightColorScheme
+import android.app.Activity
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
 import androidx.compose.foundation.isSystemInDarkTheme
 
@@ -218,7 +222,9 @@ fun SariTheme(content: @Composable () -> Unit) {
             onBackground = Color(0xFFEDEDED),
             onSurface = Color(0xFFEDEDED),
             onSurfaceVariant = Color(0xFF9A9AA5),
-            outline = Color(0xFF2E2E36)
+            surfaceVariant = Color(0xFF26262E),
+            outline = Color(0xFF2E2E36),
+            error = Color(0xFFFF7168)
         )
     } else {
         lightColorScheme(
@@ -229,8 +235,19 @@ fun SariTheme(content: @Composable () -> Unit) {
             onBackground = Color(0xFF15151A),
             onSurface = Color(0xFF15151A),
             onSurfaceVariant = Color(0xFF5E5E68),
-            outline = Color(0xFFD0D0D8)
+            surfaceVariant = Color(0xFFE6E6EC),
+            outline = Color(0xFFD0D0D8),
+            error = Color(0xFFC62828)
         )
+    }
+    // Status and navigation bar icons must stay readable on the chosen theme.
+    val view = LocalView.current
+    SideEffect {
+        (view.context as? Activity)?.window?.let { w ->
+            val controller = WindowCompat.getInsetsController(w, view)
+            controller.isAppearanceLightStatusBars = !dark
+            controller.isAppearanceLightNavigationBars = !dark
+        }
     }
     MaterialTheme(colorScheme = scheme, content = content)
 }
@@ -253,7 +270,7 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
 @Composable
 private fun NavItem(label: String, icon: ImageVector, active: Boolean, onClick: () -> Unit) {
     val scale by animateFloatAsState(targetValue = if (active) 1.14f else 1f, label = "navScale")
-    val tint = if (active) Color.White else Color(0xFF8A8A94)
+    val tint = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         Modifier.clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally

@@ -1,5 +1,6 @@
 package com.sari.tube.ui
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.animation.animateColor
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -44,7 +45,6 @@ import androidx.compose.ui.unit.sp
 private val BrandYellow = Color(0xFFFFC53D)
 private val BrandInk = Color(0xFF141414)
 private val HintGray = Color(0xFF8A8A8A)
-private val IconGray = Color(0xFF9A9AA5)
 
 @Composable
 fun AppTitle(text: String = "SARI LOOP", modifier: Modifier = Modifier) {
@@ -83,7 +83,7 @@ fun SearchPill(
             modifier
                 .fillMaxWidth()
                 .height(68.dp)
-                .border(1.dp, Color(0x55FFFFFF), RoundedCornerShape(50))
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(50))
                 .padding(start = 8.dp, end = 18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -121,7 +121,7 @@ fun SearchPill(
                     onValueChange = onValueChange,
                     singleLine = true,
                     textStyle = TextStyle(
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 18.sp,
                         textAlign = TextAlign.End
                     ),
@@ -132,7 +132,7 @@ fun SearchPill(
             Icon(
                 DownloadArrow,
                 contentDescription = "تنزيل من الرابط",
-                tint = IconGray,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .size(28.dp)
                     .clickable(onClick = onDownloadLink)

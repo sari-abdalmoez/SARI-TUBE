@@ -1,5 +1,6 @@
 package com.sari.tube.ui
 
+import androidx.compose.material3.MaterialTheme
 import coil.compose.AsyncImage
 
 import androidx.compose.material.icons.filled.Refresh
@@ -62,10 +63,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
-private val playBackground = Color(0xFF09090B)
-private val playCard = Color(0xFF18181D)
-private val playAccent = Color(0xFFFFC53D)
-private val playMuted = Color(0xFF9999A3)
 
 @Composable
 fun DownloadsScreen(onBack: () -> Unit) {
@@ -127,7 +124,7 @@ fun PlayScreen(onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(playBackground)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Row(
             modifier = Modifier
@@ -140,20 +137,20 @@ fun PlayScreen(onBack: () -> Unit) {
                 Icon(
                     Icons.Filled.ArrowBack,
                     contentDescription = "رجوع",
-                    tint = Color.White
+                    tint = MaterialTheme.colorScheme.onSurface
                 )
             }
 
             Column(Modifier.weight(1f)) {
                 Text(
                     text = "مكتبة التشغيل",
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 21.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = "${activeItems.size} نشط • ${records.size} مكتمل",
-                    color = playMuted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp
                 )
             }
@@ -167,7 +164,7 @@ fun PlayScreen(onBack: () -> Unit) {
                 Icon(
                     if (searchVisible) Icons.Filled.Close else Icons.Filled.Search,
                     contentDescription = "بحث",
-                    tint = Color.White
+                    tint = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
@@ -180,11 +177,11 @@ fun PlayScreen(onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = { selectedIds = emptySet() }) {
-                    Icon(Icons.Filled.Close, contentDescription = "إلغاء التحديد", tint = Color.White)
+                    Icon(Icons.Filled.Close, contentDescription = "إلغاء التحديد", tint = MaterialTheme.colorScheme.onSurface)
                 }
                 Text(
                     text = "${selectedIds.size} عنصر",
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f).padding(start = 6.dp)
@@ -333,14 +330,14 @@ private fun SectionTitle(
     ) {
         Text(
             text = title,
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold
         )
         Spacer(Modifier.width(8.dp))
         Text(
             text = count.toString(),
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold
         )
@@ -361,7 +358,7 @@ private fun ActiveDownloadCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(17.dp))
-            .background(playCard)
+            .background(MaterialTheme.colorScheme.surface)
             .padding(13.dp)
     ) {
         Row(
@@ -371,7 +368,7 @@ private fun ActiveDownloadCard(
                 modifier = Modifier
                     .size(43.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF292930)),
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 val thumb = item.thumbnail
@@ -386,7 +383,7 @@ private fun ActiveDownloadCard(
                     Icon(
                         Icons.Filled.PlayArrow,
                         contentDescription = null,
-                        tint = playAccent,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(25.dp)
                     )
                 }
@@ -399,7 +396,7 @@ private fun ActiveDownloadCard(
             ) {
                 Text(
                     text = item.title,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
@@ -412,9 +409,9 @@ private fun ActiveDownloadCard(
                         else -> "جارٍ التحميل"
                     },
                     color = when {
-                        failed -> Color(0xFFFF7168)
-                        queued -> playMuted
-                        else -> playAccent
+                        failed -> MaterialTheme.colorScheme.error
+                        queued -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> MaterialTheme.colorScheme.primary
                     },
                     fontSize = 11.sp
                 )
@@ -422,17 +419,17 @@ private fun ActiveDownloadCard(
 
             if (failed) {
                 IconButton(onClick = onRetry) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "إعادة المحاولة", tint = playAccent)
+                    Icon(Icons.Filled.Refresh, contentDescription = "إعادة المحاولة", tint = MaterialTheme.colorScheme.primary)
                 }
                 IconButton(onClick = onRemove) {
-                    Icon(Icons.Filled.Close, contentDescription = "إزالة", tint = Color(0xFFFF7168))
+                    Icon(Icons.Filled.Close, contentDescription = "إزالة", tint = MaterialTheme.colorScheme.error)
                 }
             } else {
                 IconButton(onClick = onCancel) {
                     Icon(
                         Icons.Filled.Close,
                         contentDescription = "إلغاء التحميل",
-                        tint = Color(0xFFFF7168)
+                        tint = MaterialTheme.colorScheme.error
                     )
                 }
             }
@@ -448,8 +445,8 @@ private fun ActiveDownloadCard(
                         .fillMaxWidth()
                         .height(5.dp)
                         .clip(RoundedCornerShape(10.dp)),
-                    color = playAccent,
-                    trackColor = Color(0xFF33333A)
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.outline
                 )
             } else {
                 LinearProgressIndicator(
@@ -457,8 +454,8 @@ private fun ActiveDownloadCard(
                         .fillMaxWidth()
                         .height(5.dp)
                         .clip(RoundedCornerShape(10.dp)),
-                    color = playAccent,
-                    trackColor = Color(0xFF33333A)
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.outline
                 )
             }
         }
@@ -474,7 +471,7 @@ private fun ActiveDownloadCard(
 
         Text(
             text = details,
-            color = if (failed) Color(0xFFFF918A) else playMuted,
+            color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 11.sp,
             modifier = Modifier.padding(top = 7.dp)
         )
@@ -505,7 +502,7 @@ private fun CompletedDownloadCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(17.dp))
-            .background(if (selected) Color(0x33FFC53D) else playCard)
+            .background(if (selected) Color(0x33FFC53D) else MaterialTheme.colorScheme.surface)
             .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -514,7 +511,7 @@ private fun CompletedDownloadCard(
             modifier = Modifier
                 .size(91.dp, 65.dp)
                 .clip(RoundedCornerShape(11.dp))
-                .background(Color(0xFF292930)),
+                .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             if (thumbnail != null) {
@@ -528,7 +525,7 @@ private fun CompletedDownloadCard(
                 Icon(
                     Icons.Filled.PlayArrow,
                     contentDescription = null,
-                    tint = playAccent,
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(29.dp)
                 )
             }
@@ -541,7 +538,7 @@ private fun CompletedDownloadCard(
         ) {
             Text(
                 text = record.name,
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
@@ -550,7 +547,7 @@ private fun CompletedDownloadCard(
             Spacer(Modifier.height(6.dp))
             Text(
                 text = "${formatDuration(record.durationMs)} • ${formatBytes(record.sizeBytes)}",
-                color = playMuted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp
             )
         }
@@ -570,13 +567,13 @@ private fun EmptyPlayState(message: String) {
             Icon(
                 PlayLibrary,
                 contentDescription = null,
-                tint = playMuted,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(44.dp)
             )
             Spacer(Modifier.height(10.dp))
             Text(
                 text = message,
-                color = playMuted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp
             )
         }

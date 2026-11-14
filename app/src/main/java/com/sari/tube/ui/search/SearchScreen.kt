@@ -13,8 +13,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import com.sari.tube.engine.PlaybackResolver
-import com.sari.tube.engine.PlaybackStream
+import com.sari.tube.ui.InAppPlayer
+import com.sari.tube.ui.player.StreamPlayer
 import kotlinx.coroutines.CancellationException
 
 import androidx.compose.ui.viewinterop.AndroidView
@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.runtime.key
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -77,7 +78,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.sari.tube.engine.UnifiedMediaItem
 import com.sari.tube.engine.VideoItem
+import com.sari.tube.ui.media.MediaDetailPanel
+import com.sari.tube.ui.media.MediaResultsPanel
+import com.sari.tube.ui.media.WatchResultsPanel
 import com.sari.tube.ui.DownloadArrow
 import com.sari.tube.ui.FormatSheet
 import androidx.compose.runtime.remember
@@ -98,70 +103,21 @@ fun SearchScreen(
     val context = LocalContext.current
 
     var playItem by remember { mutableStateOf<VideoItem?>(null) }
-    var playbackStream by remember { mutableStateOf<PlaybackStream?>(null) }
-    var retryNonce by remember { mutableStateOf(0) }
-    var playbackError by remember { mutableStateOf<String?>(null) }
-    var resolving by remember { mutableStateOf(false) }
+    var openMedia by remember { mutableStateOf<UnifiedMediaItem?>(null) }
+    var watchQuery by remember { mutableStateOf<String?>(null) }
 
     // Back closes the open player first, and only then leaves the search screen.
-    BackHandler(enabled = playItem != null) {
-        playItem = null
-        playbackStream = null
-    }
+    // Back goes one step at a time: player -> watch results -> details -> results list.
+    // Handlers declared later take priority, so the player is declared last.
+    BackHandler(enabled = openMedia != null) { openMedia = null }
+    BackHandler(enabled = watchQuery != null) { watchQuery = null }
+    BackHandler(enabled = playItem != null) { playItem = null }
 
     val listState = rememberLazyListState()
     val readyCount = (vm.state as? SearchUiState.Ready)?.items?.size ?: 0
     LaunchedEffect(listState, readyCount) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
             .collect { last -> if (readyCount > 0 && last >= readyCount - 2) vm.loadMore() }
-    }
-
-    LaunchedEffect(playItem, retryNonce) {
-        val selected = playItem
-        if (selected == null) {
-            playbackStream = null
-            resolving = false
-            return@LaunchedEffect
-        }
-
-        playbackStream = null
-        playbackError = null
-        resolving = true
-        try {
-            playbackStream = PlaybackResolver.resolve(selected.url)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            playbackError = "تعذر التشغيل: ${e.message.orEmpty().take(150)}"
-        } finally {
-            resolving = false
-        }
-    }
-
-    val player: ExoPlayer? = remember(playbackStream, context) {
-        playbackStream?.let { PlaybackResolver.createPlayer(context, it) }
-    }
-
-    DisposableEffect(player) {
-        val listener = object : Player.Listener {
-            override fun onPlayerError(error: PlaybackException) {
-                val code = error.errorCodeName
-                playbackError = when {
-                    code.contains("NETWORK", true) || code.contains("HTTP", true) ->
-                        "تعذر جلب الفيديو من المصدر. تحقق من الاتصال أو صلاحية الرابط."
-                    code.contains("PARSING", true) || code.contains("UNSUPPORTED", true) ->
-                        "صيغة الفيديو أو البث غير مدعومة."
-                    code.contains("DECODING", true) ->
-                        "تعذر فك ترميز الفيديو على الجهاز."
-                    else -> "حدث خطأ أثناء تشغيل الفيديو ($code). أعد المحاولة."
-                }
-            }
-        }
-        player?.addListener(listener)
-        onDispose {
-            player?.removeListener(listener)
-            player?.release()
-        }
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -192,90 +148,56 @@ fun SearchScreen(
             selectedTabIndex = selectedIndex,
             edgePadding = 12.dp,
             containerColor = MaterialTheme.colorScheme.background,
-            contentColor = Color.White
+            contentColor = MaterialTheme.colorScheme.onSurface
         ) {
             tabs.forEachIndexed { i, t ->
                 Tab(
                     selected = i == selectedIndex,
-                    onClick = { vm.onTabSelected(t) },
+                    onClick = {
+                        openMedia = null
+                        watchQuery = null
+                        vm.onTabSelected(t)
+                    },
                     text = { Text(t.label, fontWeight = FontWeight.SemiBold) }
                 )
             }
         }
 
-        if (playItem != null) {
-            Column(
-                Modifier.fillMaxSize().padding(12.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        playItem?.title.orEmpty(),
-                        modifier = Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.onBackground,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    IconButton(onClick = {
-                        playItem = null
-                        playbackStream = null
-                    }) {
-                        Icon(
-                            Icons.Filled.ArrowBack,
-                            contentDescription = "إغلاق المشغل",
-                            tint = MaterialTheme.colorScheme.onBackground
-                        )
-                    }
-                }
-
-                when {
-                    resolving -> Box(
-                        Modifier.fillMaxWidth().weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                    }
-
-                    playbackError != null -> Column(
-                        Modifier.fillMaxWidth().weight(1f).padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            playbackError.orEmpty(),
-                            color = MaterialTheme.colorScheme.onBackground,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Button(onClick = {
-                            playbackError = null
-                            playbackStream = null
-                            retryNonce++
-                        }) {
-                            Text("إعادة المحاولة")
-                        }
-                    }
-
-                    player != null -> AndroidView(
-                        factory = { viewContext ->
-                            PlayerView(viewContext).apply {
-                                useController = true
-                                controllerAutoShow = true
-                                controllerHideOnTouch = true
-                                setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-                                this.player = player
-                            }
-                        },
-                        update = {
-                            if (it.player !== player) it.player = player
-                        },
-                        modifier = Modifier.fillMaxWidth().weight(1f)
-                    )
-
-                    else -> Spacer(Modifier.weight(1f))
-                }
+        val openItem = playItem
+        val watch = watchQuery
+        val media = openMedia
+        val panelModifier = Modifier.fillMaxWidth().weight(1f)
+        if (openItem != null) {
+            key(openItem.id) {
+                StreamPlayer(
+                    pageUrl = openItem.url,
+                    title = openItem.title,
+                    onBack = { playItem = null },
+                    modifier = panelModifier
+                )
             }
+        } else if (watch != null) {
+            WatchResultsPanel(
+                query = watch,
+                onBack = { watchQuery = null },
+                onPlay = { playItem = it },
+                modifier = panelModifier
+            )
+        } else if (media != null) {
+            MediaDetailPanel(
+                item = media,
+                onBack = { openMedia = null },
+                onWatch = { query, _ -> watchQuery = query },
+                modifier = panelModifier
+            )
         } else if (vm.tab == SearchTab.LOCAL) {
-            LocalVideoPanel()
+            Box(panelModifier) { LocalVideoPanel() }
+        } else if (vm.tab == SearchTab.MOVIES) {
+            MediaResultsPanel(
+                query = vm.query,
+                onOpen = { openMedia = it },
+                modifier = panelModifier
+            )
         } else when (val s = vm.state) {
             SearchUiState.Idle -> Spacer(Modifier.fillMaxSize())
 
@@ -460,50 +382,18 @@ private fun LocalVideoPanel() {
         }
     }
 
-    val player: ExoPlayer? = remember(selectedUri) {
-        selectedUri?.let { uri ->
-            ExoPlayer.Builder(context).build().apply {
-                setMediaItem(MediaItem.fromUri(uri))
-                prepare()
-                playWhenReady = true
-            }
-        }
-    }
-
-    DisposableEffect(player) {
-        onDispose { player?.release() }
-    }
-
-    Column(
-        Modifier.fillMaxSize().padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Button(onClick = { picker.launch(arrayOf("video/*")) }) {
-            Text("اختيار فيديو من الهاتف")
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        if (player != null) {
-            AndroidView(
-                factory = { viewContext ->
-                    PlayerView(viewContext).apply {
-                        useController = true
-                        this.player = player
-                    }
-                },
-                update = { it.player = player },
-                modifier = Modifier.fillMaxWidth().weight(1f)
-            )
-        } else {
-            Box(
-                Modifier.fillMaxWidth().weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    " ",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+    val chosen = selectedUri
+    if (chosen != null) {
+        // Same player and controls as the downloads screen. Back returns to the picker.
+        InAppPlayer(uri = chosen, title = "فيديو من الهاتف", onClose = { selectedUri = null })
+    } else {
+        Column(
+            Modifier.fillMaxSize().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Button(onClick = { picker.launch(arrayOf("video/*")) }) {
+                Text("اختيار فيديو من الهاتف")
             }
         }
     }
