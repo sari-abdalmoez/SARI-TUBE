@@ -345,7 +345,7 @@ private fun PlayerSurface(
                     VerticalSlider(
                         value = ui.volume,
                         onChange = {
-                            ui.setVolume(it)
+                            ui.applyVolume(it)
                             ui.touch()
                         }
                     )
