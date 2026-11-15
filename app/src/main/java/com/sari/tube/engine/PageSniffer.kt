@@ -3,6 +3,8 @@ package com.sari.tube.engine
 import android.annotation.SuppressLint
 import android.content.Context
 import android.webkit.CookieManager
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -20,7 +22,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * the cookies and referrer that browser used, so the player can fetch it the same way.
  */
 object PageSniffer {
-    private const val TIMEOUT_MS = 30_000L
+    private const val TIMEOUT_MS = 18_000L
 
     private val BLOCKED_HEADERS = setOf(
         "host", "connection", "content-length", "transfer-encoding", "range", "accept-encoding"
@@ -48,17 +50,33 @@ object PageSniffer {
     @SuppressLint("SetJavaScriptEnabled")
     suspend fun sniff(context: Context, pageUrl: String): PlaybackStream? {
         val found = CompletableDeferred<PlaybackStream>()
+        val candidates = ConcurrentHashMap<String, PlaybackStream>()
+        val completionScheduled = AtomicBoolean(false)
+
+        fun consider(stream: PlaybackStream) {
+            candidates[stream.url] = stream
+            if (completionScheduled.compareAndSet(false, true)) {
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    val best = candidates.values.maxByOrNull { priority(it) }
+                    if (best != null && !found.isCompleted) found.complete(best)
+                }, 1_200L)
+            }
+        }
+
         val view = withContext(Dispatchers.Main) {
             WebView(context).apply {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.mediaPlaybackRequiresUserGesture = false
                 settings.loadsImagesAutomatically = false
+                settings.javaScriptCanOpenWindowsAutomatically = false
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
                 webViewClient = object : WebViewClient() {
                     // Called on a background thread by the WebView.
                     override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                         if (request != null) {
-                            mediaStreamFor(request, pageUrl)?.let { found.complete(it) }
+                            mediaStreamFor(request, pageUrl)?.let(::consider)
                         }
                         return null
                     }
@@ -80,15 +98,26 @@ object PageSniffer {
         }
     }
 
+    private fun priority(stream: PlaybackStream): Int = when (stream.mimeType) {
+        MimeTypes.APPLICATION_M3U8 -> 4
+        MimeTypes.APPLICATION_MPD -> 3
+        else -> 2
+    }
+
     private fun mediaStreamFor(request: WebResourceRequest, pageUrl: String): PlaybackStream? {
         if (!request.method.equals("GET", ignoreCase = true)) return null
         val uri = request.url ?: return null
         val full = uri.toString()
         val path = uri.path?.lowercase().orEmpty()
-        val isHls = path.endsWith(".m3u8") || full.lowercase().contains(".m3u8?")
-        val isDash = path.endsWith(".mpd") || full.lowercase().contains(".mpd?")
+        val lower = full.lowercase()
+        val isHls = path.endsWith(".m3u8") || lower.contains(".m3u8?") ||
+            lower.contains("format=m3u8") || request.requestHeaders.entries.any {
+                it.key.equals("Accept", true) && it.value.contains("mpegurl", true)
+            }
+        val isDash = path.endsWith(".mpd") || lower.contains(".mpd?") ||
+            lower.contains("type=application/dash+xml")
         val isFile = isHls || isDash || path.endsWith(".mp4") || path.endsWith(".webm") ||
-            full.lowercase().contains(".mp4?") || full.lowercase().contains(".webm?")
+            lower.contains(".mp4?") || lower.contains(".webm?")
         if (!isFile) return null
 
         val headers = LinkedHashMap<String, String>()
@@ -96,6 +125,9 @@ object PageSniffer {
             if (name.lowercase() !in BLOCKED_HEADERS) headers[name] = value
         }
         headers.putIfAbsent("Referer", pageUrl)
+        headers.putIfAbsent("User-Agent", request.requestHeaders.entries.firstOrNull {
+            it.key.equals("User-Agent", true)
+        }?.value ?: "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36")
         CookieManager.getInstance().getCookie(full)
             ?.takeIf { it.isNotBlank() }
             ?.let { headers["Cookie"] = it }

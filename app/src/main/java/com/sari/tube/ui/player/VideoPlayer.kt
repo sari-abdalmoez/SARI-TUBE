@@ -116,7 +116,7 @@ private class PlayerUi(val player: ExoPlayer, private val audio: AudioManager?) 
     var speed by mutableFloatStateOf(player.playbackParameters.speed)
     var volume by mutableFloatStateOf(readDeviceVolume())
     var brightness by mutableFloatStateOf(-1f) // -1 means the system brightness
-    var fill by mutableStateOf(true)           // true: crop the picture to fill the screen (the default)
+    var fill by mutableStateOf(false)          // fit the full video frame without cropping
     var locked by mutableStateOf(false)
     var controlsVisible by mutableStateOf(true)
     var tick by mutableLongStateOf(0L)

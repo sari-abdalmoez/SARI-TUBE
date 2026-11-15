@@ -27,7 +27,7 @@ object PageScraper {
     )
 
     private val MEDIA_REGEX = Regex(
-        """https?://[^\s"'<>\\]+?\.(?:m3u8|mp4)(?:[?#][^\s"'<>\\]*)?""",
+        """https?://[^\s"'<>\\]+?\.(?:m3u8|mpd|mp4|webm)(?:[?#][^\s"'<>\\]*)?""",
         RegexOption.IGNORE_CASE
     )
 
@@ -104,9 +104,14 @@ object PageScraper {
 
     private fun collect(doc: Document, base: String, out: MutableSet<Candidate>) {
         // Attributes that name a media file.
-        doc.select("video[src], video source[src], source[src], audio[src]").forEach { el ->
-            addIfMedia(el.absUrl("src"), base, out)
-        }
+        doc.select("video[src], video source[src], source[src], audio[src], [data-src], [data-hls], [data-dash], [data-file], [data-video]")
+            .forEach { el ->
+                listOf("src", "data-src", "data-hls", "data-dash", "data-file", "data-video")
+                    .forEach { attribute ->
+                        val raw = el.attr(attribute)
+                        if (raw.isNotBlank()) addIfMedia(el.absUrl(attribute).ifBlank { raw }, base, out)
+                    }
+            }
         doc.select("meta[property=og:video], meta[property=og:video:url], meta[name=twitter:player:stream]")
             .forEach { el -> addIfMedia(el.absUrl("content"), base, out) }
         doc.select("a[href]").forEach { el ->
@@ -115,8 +120,14 @@ object PageScraper {
         }
 
         // Scripts often hold the address the player will load. Escaped slashes are restored first.
-        val text = doc.html().replace("\\/", "/").replace("&amp;", "&")
-        MEDIA_REGEX.findAll(text).forEach { addIfMedia(it.value, base, out) }
+        val text = doc.html()
+            .replace("\\/", "/")
+            .replace("\\u0026", "&", ignoreCase = true)
+            .replace("&amp;", "&")
+            .replace("\\u003d", "=", ignoreCase = true)
+        MEDIA_REGEX.findAll(text).forEach {
+            addIfMedia(it.value.trimEnd(')', ']', ',', ';'), base, out)
+        }
     }
 
     private fun addIfMedia(url: String, base: String, out: MutableSet<Candidate>) {
@@ -148,6 +159,11 @@ object PageScraper {
                 setRequestProperty("Referer", referer)
                 setRequestProperty("Range", "bytes=0-1023")
             }
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty(
+                "Accept",
+                "video/*,application/vnd.apple.mpegurl,application/x-mpegURL,application/dash+xml,*/*;q=0.8"
+            )
             val code = conn.responseCode
             if (code !in 200..299) return false
             val type = conn.contentType.orEmpty().lowercase()
@@ -155,13 +171,20 @@ object PageScraper {
             val buffer = ByteArray(64)
             val read = conn.inputStream.use { it.read(buffer) }
             if (read <= 0) return false
-            val head = String(buffer, 0, read, Charsets.ISO_8859_1).trimStart()
+            val head = String(buffer, 0, read, Charsets.ISO_8859_1)
+                .trimStart('\uFEFF', ' ', '\n', '\r', '\t')
+            val isMp4 = read >= 8 &&
+                String(buffer, 4, 4, Charsets.US_ASCII) == "ftyp"
+            val isWebm = read >= 4 &&
+                buffer[0] == 0x1A.toByte() &&
+                buffer[1] == 0x45.toByte() &&
+                buffer[2] == 0xDF.toByte() &&
+                buffer[3] == 0xA3.toByte()
             when {
                 isHls(url) || type.contains("mpegurl") -> head.startsWith("#EXTM3U")
                 isDash(url) || type.contains("dash+xml") -> head.contains("<MPD", ignoreCase = true)
                 type.startsWith("video/") -> true
-                head.length >= 8 && head.substring(4, 8) == "ftyp" -> true
-                head.startsWith("webm", ignoreCase = true) -> true
+                isMp4 || isWebm -> true
                 else -> false
             }
         } catch (e: Exception) {
@@ -175,7 +198,10 @@ object PageScraper {
     private fun isDash(url: String) = url.contains(".mpd", ignoreCase = true)
     private fun isMediaUrl(url: String): Boolean {
         val lower = url.lowercase()
-        return listOf(".m3u8", ".mpd", ".mp4", ".webm").any { lower.contains(it) }
+        return Regex("""\.(m3u8|mpd|mp4|webm)(?:[?#]|$)""").containsMatchIn(lower) ||
+            lower.contains("format=m3u8") ||
+            lower.contains("type=application/vnd.apple.mpegurl") ||
+            lower.contains("type=application/dash+xml")
     }
     private fun mediaPriority(url: String): Int = when {
         isHls(url) -> 4

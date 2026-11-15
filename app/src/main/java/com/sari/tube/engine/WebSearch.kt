@@ -14,7 +14,7 @@ import java.net.URLEncoder
 object WebSearch {
     private const val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
-    private const val MAX_RESULTS = 30
+    private const val MAX_RESULTS = 40
 
     suspend fun search(query: String, site: String? = null): List<VideoItem> =
         withContext(Dispatchers.IO) {
@@ -26,7 +26,13 @@ object WebSearch {
                 "facebook" -> "site:facebook.com $clean"
                 else -> clean
             }
-            val queries = listOf(scoped, "\"$clean\" watch online").distinct()
+            val queries = listOf(
+                scoped,
+                "\"$clean\" watch online",
+                "\"$clean\" full movie online",
+                "\"$clean\" streaming",
+                "$clean مشاهدة اون لاين"
+            ).distinct()
 
             val batches = coroutineScope {
                 queries.flatMap { q ->

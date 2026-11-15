@@ -1,5 +1,12 @@
 package com.sari.tube.ui.player
 
+import androidx.activity.compose.BackHandler
+import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -56,6 +63,7 @@ fun StreamPlayer(
     var selected by remember(pageUrl) { mutableIntStateOf(-1) }
     var resolving by remember(pageUrl) { mutableStateOf(true) }
     var resolveError by remember(pageUrl) { mutableStateOf<String?>(null) }
+    var browserFallback by remember(pageUrl) { mutableStateOf(false) }
     var playerError by remember(pageUrl) { mutableStateOf<String?>(null) }
     var player by remember(pageUrl) { mutableStateOf<ExoPlayer?>(null) }
     var resumeMs by remember(pageUrl) { mutableLongStateOf(0L) }
@@ -64,6 +72,7 @@ fun StreamPlayer(
     LaunchedEffect(pageUrl, retryNonce) {
         resolving = true
         resolveError = null
+        browserFallback = false
         playerError = null
         session = null
         try {
@@ -73,7 +82,12 @@ fun StreamPlayer(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            resolveError = e.message?.takeIf { it.isNotBlank() } ?: "تعذر تشغيل الفيديو."
+            if (e is com.sari.tube.engine.ResolveException && e.canRetryWithBrowser) {
+                // MSE/blob streams must remain in the browser page that created them.
+                browserFallback = true
+            } else {
+                resolveError = e.message?.takeIf { it.isNotBlank() } ?: "تعذر تشغيل الفيديو."
+            }
         } finally {
             resolving = false
         }
@@ -146,8 +160,11 @@ fun StreamPlayer(
     val current: ExoPlayer? = player
     val qualities = session?.streams?.map { it.label }.orEmpty()
 
+    BackHandler(enabled = browserFallback, onBack = onBack)
+
     Box(modifier.fillMaxSize().background(Color.Black)) {
         when {
+            browserFallback -> BrowserPlaybackPage(pageUrl = pageUrl, title = title, onBack = onBack)
             resolving -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Color(0xFFFFB300))
             }
@@ -189,6 +206,46 @@ fun StreamPlayer(
             )
 
             else -> Box(Modifier.fillMaxSize())
+        }
+    }
+}
+
+
+@Composable
+private fun BrowserPlaybackPage(pageUrl: String, title: String, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val webView = androidx.compose.runtime.remember(pageUrl) {
+        WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            settings.javaScriptCanOpenWindowsAutomatically = false
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            webChromeClient = WebChromeClient()
+            webViewClient = WebViewClient()
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+            loadUrl(pageUrl)
+        }
+    }
+    DisposableEffect(webView) {
+        onDispose {
+            webView.stopLoading()
+            webView.loadUrl("about:blank")
+            webView.removeAllViews()
+            webView.destroy()
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
+        Column(
+            Modifier.align(Alignment.TopStart).padding(10.dp)
+                .background(Color(0x99000000), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
+            Button(onClick = onBack) { Text("رجوع للمصادر") }
+            Text(title, color = Color.White, maxLines = 1)
         }
     }
 }

@@ -86,7 +86,10 @@ object PlaybackResolver {
         }
         PageScraper.scrape(pageUrl)?.let { return single(pageUrl, it) }
         PageSniffer.sniff(context, pageUrl)?.let { return single(pageUrl, it) }
-        throw ResolveException("لم نجد فيديو قابلاً للتشغيل في هذه الصفحة. جرّب نتيجة أخرى.")
+        throw ResolveException(
+            "لم نعثر على رابط مباشر؛ جرّب تشغيل الصفحة داخل المتصفح المدمج.",
+            canRetryWithBrowser = true
+        )
     }
 
     private fun single(pageUrl: String, stream: PlaybackStream) = PlaybackSession(
@@ -97,7 +100,7 @@ object PlaybackResolver {
 
     private suspend fun extract(pageUrl: String): PlaybackSession {
         if (!YtDlpEngine.awaitReady()) {
-            throw ResolveException("محرك استخراج الفيديو لم يجهز بعد، حاول بعد لحظات.", canRetryWithBrowser = false)
+            throw ResolveException("محرك الاستخراج لم يجهز بعد؛ سنحاول فتح الصفحة في المشغل المدمج.", canRetryWithBrowser = true)
         }
         val processId = "playback-${counter.incrementAndGet()}"
         val raw = withContext(Dispatchers.IO) {
@@ -129,7 +132,13 @@ object PlaybackResolver {
             }
         }
         if (raw.isBlank()) throw ResolveException("لم يُرجع المستخرج أي بيانات لهذه الصفحة.", canRetryWithBrowser = true)
-        return parse(raw)
+        return try {
+            parse(raw)
+        } catch (e: ResolveException) {
+            throw e
+        } catch (e: Exception) {
+            throw ResolveException("تعذر تحليل بيانات الفيديو التي أعادها الموقع.", canRetryWithBrowser = true)
+        }
     }
 
     /** Parses yt-dlp's JSON and builds the list of qualities. */
@@ -201,21 +210,33 @@ object PlaybackResolver {
         val audio = audioOnly.maxByOrNull { it.first }?.second
         if (audio != null) {
             val audioUrl = audio.optString("url")
-            val audioIsHls = audio.optString("protocol").contains("m3u8") || audioUrl.contains(".m3u8")
+            val audioProtocol = audio.optString("protocol")
+            val audioIsHls = audioProtocol.contains("m3u8") || audioUrl.contains(".m3u8")
+            val audioIsDash = audioProtocol.contains("dash", true) || audioUrl.contains(".mpd", true)
             for ((height, candidate) in videoOnly) {
                 if (muxed.containsKey(height)) continue
                 val v = candidate.second
                 val videoUrl = v.optString("url")
-                val videoIsHls = v.optString("protocol").contains("m3u8") || videoUrl.contains(".m3u8")
+                val videoProtocol = v.optString("protocol")
+                val videoIsHls = videoProtocol.contains("m3u8") || videoUrl.contains(".m3u8")
+                val videoIsDash = videoProtocol.contains("dash", true) || videoUrl.contains(".mpd", true)
                 streams += PlaybackStream(
                     url = videoUrl,
                     headers = mergedHeaders(rootHeaders, v),
-                    mimeType = if (videoIsHls) MimeTypes.APPLICATION_M3U8 else null,
+                    mimeType = when {
+                        videoIsHls -> MimeTypes.APPLICATION_M3U8
+                        videoIsDash -> MimeTypes.APPLICATION_MPD
+                        else -> null
+                    },
                     height = height,
                     label = labelFor(height),
                     audioUrl = audioUrl,
                     audioHeaders = mergedHeaders(rootHeaders, audio),
-                    audioMime = if (audioIsHls) MimeTypes.APPLICATION_M3U8 else null
+                    audioMime = when {
+                        audioIsHls -> MimeTypes.APPLICATION_M3U8
+                        audioIsDash -> MimeTypes.APPLICATION_MPD
+                        else -> null
+                    }
                 )
             }
         }
@@ -259,7 +280,7 @@ object PlaybackResolver {
     private fun classify(message: String?): ResolveException {
         val m = message.orEmpty()
         return when {
-            m.contains("DRM", ignoreCase = false) ->
+            m.contains("DRM", ignoreCase = true) ->
                 ResolveException("هذا الموقع محمي بتقنية DRM، ولا يمكن تشغيله داخل التطبيق.")
             m.contains("private", true) || m.contains("sign in", true) || m.contains("log in", true) ->
                 ResolveException("هذا المحتوى خاص أو يتطلب تسجيل دخول.")
@@ -296,21 +317,25 @@ object PlaybackResolver {
 
     @OptIn(UnstableApi::class)
     fun createPlayer(context: Context, stream: PlaybackStream, startMs: Long = 0L): ExoPlayer {
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(30_000)
-            .setAllowCrossProtocolRedirects(true)
-        val headers = stream.headers + stream.audioHeaders
-        if (headers.isNotEmpty()) httpFactory.setDefaultRequestProperties(headers)
+        fun sourceFactory(headers: Map<String, String>): DefaultMediaSourceFactory {
+            val httpFactory = DefaultHttpDataSource.Factory()
+                .setConnectTimeoutMs(15_000)
+                .setReadTimeoutMs(30_000)
+                .setAllowCrossProtocolRedirects(true)
+            if (headers.isNotEmpty()) httpFactory.setDefaultRequestProperties(headers)
+            return DefaultMediaSourceFactory(DefaultDataSource.Factory(context, httpFactory))
+        }
 
-        val factory = DefaultMediaSourceFactory(DefaultDataSource.Factory(context, httpFactory))
-        val video = mediaSource(factory, stream.url, stream.mimeType)
+        // Audio and video endpoints can require different cookies, Referer and Origin headers.
+        val videoFactory = sourceFactory(stream.headers)
+        val audioFactory = sourceFactory(stream.audioHeaders)
+        val video = mediaSource(videoFactory, stream.url, stream.mimeType)
         val source: MediaSource = stream.audioUrl?.let { audioUrl ->
-            MergingMediaSource(video, mediaSource(factory, audioUrl, stream.audioMime))
+            MergingMediaSource(video, mediaSource(audioFactory, audioUrl, stream.audioMime))
         } ?: video
 
         val player = ExoPlayer.Builder(context)
-            .setMediaSourceFactory(factory)
+            .setMediaSourceFactory(videoFactory)
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(10_000)
             .setAudioAttributes(AudioAttributes.DEFAULT, true)
