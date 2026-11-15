@@ -374,16 +374,22 @@ fun WatchResultsPanel(
             val usable = raw.filterNot { PageScraper.isDrmSite(it.url) }
             drmHidden = raw.size - usable.size
             // Each page is checked in parallel. A page that does not answer in time counts as unverified.
+            // Verify a limited first batch. Do not discard other search candidates:
+            // yt-dlp and the hidden browser can still resolve them when the user opens one.
+            val toVerify = usable.take(12)
             val checks = coroutineScope {
-                usable.map { item ->
+                toVerify.map { item ->
                     async {
-                        val ok = withTimeoutOrNull(25_000L) { PageScraper.hasPlayableVideo(item.url) } ?: false
+                        val ok = withTimeoutOrNull(12_000L) {
+                            PageScraper.hasPlayableVideo(item.url)
+                        } ?: false
                         item to ok
                     }
                 }.awaitAll()
             }
             verified = checks.filter { it.second }.map { it.first }
-            unverified = checks.filterNot { it.second }.map { it.first }
+            unverified = checks.filterNot { it.second }.map { it.first } +
+                usable.drop(toVerify.size)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -494,7 +500,7 @@ private fun WatchRow(item: VideoItem, verified: Boolean, onPlay: (VideoItem) -> 
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            if (verified) item.channel else "${item.channel} • غير متحقق",
+            if (verified) item.channel else "${item.channel} • صفحة مرشحة - التحقق عند التشغيل",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             maxLines = 1

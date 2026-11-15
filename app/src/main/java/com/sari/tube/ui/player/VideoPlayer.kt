@@ -213,7 +213,7 @@ fun VideoPlayer(
             ui.position = ui.player.currentPosition.coerceAtLeast(0L)
             val d = ui.player.duration
             ui.duration = if (d > 0) d else 0L
-            delay(250L)
+            delay(if (ui.dragging) 500L else 1_000L)
         }
     }
 
@@ -339,45 +339,15 @@ private fun PlayerSurface(
                     ui.touch()
                 })
 
-                // Left: device volume.
-                Column(
-                    Modifier.align(Alignment.CenterStart).padding(start = 22.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    VerticalSlider(
-                        value = ui.volume,
-                        onChange = {
-                            ui.applyVolume(it)
-                            ui.touch()
-                        }
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Icon(Icons.Filled.VolumeUp, contentDescription = "الصوت", tint = Color.White)
-                }
-
-                // Right: brightness, and the lock button below it.
-                Row(
-                    Modifier.align(Alignment.CenterEnd).padding(end = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        VerticalSlider(
-                            value = if (ui.brightness < 0f) 0.5f else ui.brightness,
-                            onChange = {
-                                ui.brightness = it.coerceIn(0.01f, 1f)
-                                ui.touch()
-                            }
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Icon(Icons.Filled.Brightness6, contentDescription = "السطوع", tint = Color.White)
-                    }
-                    Spacer(Modifier.width(18.dp))
-                    IconButton(onClick = {
+                // Keep the screen edges clear; use hardware volume keys for device volume.
+                IconButton(
+                    onClick = {
                         ui.locked = true
                         ui.touch()
-                    }) {
-                        Icon(Icons.Filled.LockOpen, contentDescription = "قفل الشاشة", tint = Color.White)
-                    }
+                    },
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp)
+                ) {
+                    Icon(Icons.Filled.LockOpen, contentDescription = "قفل الشاشة", tint = Color.White)
                 }
 
                 BottomBar(ui, qualityLabels, selectedQuality, onOpenSettings = {

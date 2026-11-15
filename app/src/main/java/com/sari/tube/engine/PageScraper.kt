@@ -17,7 +17,7 @@ import java.net.URL
 object PageScraper {
     private const val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
-    private const val MAX_CHECKS = 6
+    private const val MAX_CHECKS = 10
 
     /** Streaming services that use DRM. Their video cannot be played outside their own apps. */
     private val DRM_HOSTS = listOf(
@@ -55,7 +55,7 @@ object PageScraper {
         }
 
         // HLS playlists first: they adapt to the connection and are the usual source of full episodes.
-        val ordered = found.sortedByDescending { if (it.url.contains(".m3u8", ignoreCase = true)) 1 else 0 }
+        val ordered = found.sortedByDescending { mediaPriority(it.url) }
         for (c in ordered.take(MAX_CHECKS)) {
             if (verify(c.url, c.referer)) {
                 val origin = originOf(c.referer)
@@ -66,7 +66,7 @@ object PageScraper {
                         "User-Agent" to USER_AGENT,
                         "Origin" to origin
                     ),
-                    mimeType = if (c.url.contains(".m3u8", ignoreCase = true)) MimeTypes.APPLICATION_M3U8 else null,
+                    mimeType = mimeTypeFor(c.url),
                     height = 0,
                     label = "تلقائي"
                 )
@@ -87,7 +87,19 @@ object PageScraper {
         val doc = fetch(pageUrl, pageUrl) ?: return@withContext false
         val html = doc.html().lowercase()
         if (DRM_MARKERS.any { html.contains(it) }) return@withContext false
-        scrape(pageUrl) != null
+
+        // Reuse the downloaded document instead of downloading the same page again.
+        val found = LinkedHashSet<Candidate>()
+        collect(doc, pageUrl, found)
+        doc.select("iframe[src]").take(3).forEach { frame ->
+            val src = frame.absUrl("src")
+            if (src.startsWith("http")) {
+                fetch(src, pageUrl)?.let { collect(it, src, found) }
+            }
+        }
+        found.sortedByDescending { mediaPriority(it.url) }
+            .take(MAX_CHECKS)
+            .any { verify(it.url, it.referer) }
     }
 
     private fun collect(doc: Document, base: String, out: MutableSet<Candidate>) {
@@ -99,7 +111,7 @@ object PageScraper {
             .forEach { el -> addIfMedia(el.absUrl("content"), base, out) }
         doc.select("a[href]").forEach { el ->
             val href = el.absUrl("href")
-            if (href.endsWith(".mp4", true) || href.endsWith(".m3u8", true)) addIfMedia(href, base, out)
+            if (isMediaUrl(href)) addIfMedia(href, base, out)
         }
 
         // Scripts often hold the address the player will load. Escaped slashes are restored first.
@@ -108,7 +120,7 @@ object PageScraper {
     }
 
     private fun addIfMedia(url: String, base: String, out: MutableSet<Candidate>) {
-        if (!url.startsWith("http", ignoreCase = true)) return
+        if (!url.startsWith("http", ignoreCase = true) || !isMediaUrl(url)) return
         if (AD_MARKERS.any { url.contains(it, ignoreCase = true) }) return
         out += Candidate(url, base)
     }
@@ -139,17 +151,42 @@ object PageScraper {
             val code = conn.responseCode
             if (code !in 200..299) return false
             val type = conn.contentType.orEmpty().lowercase()
-            if (type.startsWith("text/html")) return false
-            val buffer = ByteArray(16)
+            if (type.startsWith("text/html") || type.contains("json")) return false
+            val buffer = ByteArray(64)
             val read = conn.inputStream.use { it.read(buffer) }
             if (read <= 0) return false
-            val head = String(buffer, 0, read, Charsets.ISO_8859_1)
-            if (url.contains(".m3u8", ignoreCase = true)) head.startsWith("#EXTM3U") else !head.trimStart().startsWith("<")
+            val head = String(buffer, 0, read, Charsets.ISO_8859_1).trimStart()
+            when {
+                isHls(url) || type.contains("mpegurl") -> head.startsWith("#EXTM3U")
+                isDash(url) || type.contains("dash+xml") -> head.contains("<MPD", ignoreCase = true)
+                type.startsWith("video/") -> true
+                head.length >= 8 && head.substring(4, 8) == "ftyp" -> true
+                head.startsWith("webm", ignoreCase = true) -> true
+                else -> false
+            }
         } catch (e: Exception) {
             false
         } finally {
             conn?.disconnect()
         }
+    }
+
+    private fun isHls(url: String) = url.contains(".m3u8", ignoreCase = true)
+    private fun isDash(url: String) = url.contains(".mpd", ignoreCase = true)
+    private fun isMediaUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return listOf(".m3u8", ".mpd", ".mp4", ".webm").any { lower.contains(it) }
+    }
+    private fun mediaPriority(url: String): Int = when {
+        isHls(url) -> 4
+        isDash(url) -> 3
+        url.contains(".mp4", true) -> 2
+        else -> 1
+    }
+    private fun mimeTypeFor(url: String): String? = when {
+        isHls(url) -> MimeTypes.APPLICATION_M3U8
+        isDash(url) -> MimeTypes.APPLICATION_MPD
+        else -> null
     }
 
     private fun hostOf(url: String): String? =

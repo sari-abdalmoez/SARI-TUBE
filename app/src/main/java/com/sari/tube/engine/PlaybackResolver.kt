@@ -155,7 +155,11 @@ object PlaybackResolver {
             val url = f.optString("url")
             if (!(url.startsWith("https://") || url.startsWith("http://"))) continue
             val protocol = f.optString("protocol")
-            if (protocol.startsWith("http_dash") || protocol == "mhtml") continue
+            val isDash = protocol.contains("dash", ignoreCase = true) ||
+                url.contains(".mpd", ignoreCase = true)
+            if ((protocol.startsWith("http_dash") && !url.contains(".mpd", ignoreCase = true)) ||
+                protocol == "mhtml"
+            ) continue
 
             val hasVideo = hasCodec(f, "vcodec")
             val hasAudio = hasCodec(f, "acodec")
@@ -172,7 +176,7 @@ object PlaybackResolver {
                     val stream = PlaybackStream(
                         url = url,
                         headers = mergedHeaders(rootHeaders, f),
-                        mimeType = if (isHls) MimeTypes.APPLICATION_M3U8 else null,
+                        mimeType = when { isHls -> MimeTypes.APPLICATION_M3U8; isDash -> MimeTypes.APPLICATION_MPD; else -> null },
                         height = height,
                         label = labelFor(height)
                     )

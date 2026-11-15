@@ -86,7 +86,8 @@ object PageSniffer {
         val full = uri.toString()
         val path = uri.path?.lowercase().orEmpty()
         val isHls = path.endsWith(".m3u8") || full.lowercase().contains(".m3u8?")
-        val isFile = isHls || path.endsWith(".mp4") || path.endsWith(".webm") ||
+        val isDash = path.endsWith(".mpd") || full.lowercase().contains(".mpd?")
+        val isFile = isHls || isDash || path.endsWith(".mp4") || path.endsWith(".webm") ||
             full.lowercase().contains(".mp4?") || full.lowercase().contains(".webm?")
         if (!isFile) return null
 
@@ -102,7 +103,7 @@ object PageSniffer {
         return PlaybackStream(
             url = full,
             headers = headers,
-            mimeType = if (isHls) MimeTypes.APPLICATION_M3U8 else null,
+            mimeType = when { isHls -> MimeTypes.APPLICATION_M3U8; isDash -> MimeTypes.APPLICATION_MPD; else -> null },
             height = 0,
             label = "تلقائي"
         )
