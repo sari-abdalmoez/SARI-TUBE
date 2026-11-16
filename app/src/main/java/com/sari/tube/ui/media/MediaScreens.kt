@@ -444,7 +444,7 @@ fun WatchResultsPanel(
             else -> {
                 val good = verified.orEmpty()
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (drmHidden > 0) {
+                    if (filteredHidden > 0) {
                         item {
                             Text(
                                 "أُخفيت $filteredHidden صفحة غير مرتبطة بالبحث أو غير مناسبة أو محمية بـ DRM",
