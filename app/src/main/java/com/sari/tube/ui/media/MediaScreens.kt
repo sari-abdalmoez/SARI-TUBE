@@ -360,7 +360,7 @@ fun WatchResultsPanel(
 ) {
     var verified by remember(query) { mutableStateOf<List<VideoItem>?>(null) }
     var unverified by remember(query) { mutableStateOf<List<VideoItem>>(emptyList()) }
-    var drmHidden by remember(query) { mutableIntStateOf(0) }
+    var filteredHidden by remember(query) { mutableIntStateOf(0) }
     var error by remember(query) { mutableStateOf<String?>(null) }
     var loading by remember(query) { mutableStateOf(true) }
     var attempt by remember(query) { mutableIntStateOf(0) }
@@ -371,8 +371,10 @@ fun WatchResultsPanel(
         verified = null
         try {
             val raw = WebSearch.search(query)
-            val usable = raw.filterNot { PageScraper.isDrmSite(it.url) }
-            drmHidden = raw.size - usable.size
+            val usable = raw.filter {
+                WebSearch.isRelevantAndSafe(query, it) && !PageScraper.isDrmSite(it.url)
+            }
+            filteredHidden = raw.size - usable.size
             // Each page is checked in parallel. A page that does not answer in time counts as unverified.
             // Verify a limited first batch. Do not discard other search candidates:
             // yt-dlp and the hidden browser can still resolve them when the user opens one.
@@ -445,7 +447,7 @@ fun WatchResultsPanel(
                     if (drmHidden > 0) {
                         item {
                             Text(
-                                "أُخفيت $drmHidden صفحة محمية بـ DRM",
+                                "أُخفيت $filteredHidden صفحة غير مرتبطة بالبحث أو غير مناسبة أو محمية بـ DRM",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp
                             )

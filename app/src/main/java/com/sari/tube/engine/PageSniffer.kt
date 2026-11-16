@@ -59,7 +59,7 @@ object PageSniffer {
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                     val best = candidates.values.maxByOrNull { priority(it) }
                     if (best != null && !found.isCompleted) found.complete(best)
-                }, 1_200L)
+                }, 4_000L)
             }
         }
 
@@ -98,10 +98,17 @@ object PageSniffer {
         }
     }
 
-    private fun priority(stream: PlaybackStream): Int = when (stream.mimeType) {
-        MimeTypes.APPLICATION_M3U8 -> 4
-        MimeTypes.APPLICATION_MPD -> 3
-        else -> 2
+    private fun priority(stream: PlaybackStream): Int {
+        val url = stream.url.lowercase()
+        val manifestNameBoost = if (
+            url.contains("master") || url.contains("playlist") ||
+            url.contains("index.m3u8") || url.contains("manifest")
+        ) 20 else 0
+        return when (stream.mimeType) {
+            MimeTypes.APPLICATION_M3U8 -> 400 + manifestNameBoost
+            MimeTypes.APPLICATION_MPD -> 300 + manifestNameBoost
+            else -> 200
+        }
     }
 
     private fun mediaStreamFor(request: WebResourceRequest, pageUrl: String): PlaybackStream? {
@@ -110,12 +117,26 @@ object PageSniffer {
         val full = uri.toString()
         val path = uri.path?.lowercase().orEmpty()
         val lower = full.lowercase()
+        // Ignore HLS/DASH media fragments and advertisement chunks. The player needs the
+        // playlist/manifest URL, not an individual segment that finishes after a few seconds.
+        val fragmentMarkers = listOf(
+            ".m4s", ".ts", "/segment/", "/segments/", "/chunk/", "/chunks/",
+            "segment-", "chunk-", "/ad/"
+        )
+        if (fragmentMarkers.any { lower.contains(it) }) return null
+
+        val accept = request.requestHeaders.entries.firstOrNull {
+            it.key.equals("Accept", true)
+        }?.value.orEmpty()
+        val manifestPath = path.contains("manifest") || path.contains("playlist") ||
+            path.contains("master") || path.contains("index")
         val isHls = path.endsWith(".m3u8") || lower.contains(".m3u8?") ||
-            lower.contains("format=m3u8") || request.requestHeaders.entries.any {
-                it.key.equals("Accept", true) && it.value.contains("mpegurl", true)
-            }
+            lower.contains("format=m3u8") ||
+            lower.contains("type=application/vnd.apple.mpegurl") ||
+            (accept.contains("mpegurl", true) && manifestPath)
         val isDash = path.endsWith(".mpd") || lower.contains(".mpd?") ||
-            lower.contains("type=application/dash+xml")
+            lower.contains("type=application/dash+xml") ||
+            (accept.contains("dash+xml", true) && manifestPath)
         val isFile = isHls || isDash || path.endsWith(".mp4") || path.endsWith(".webm") ||
             lower.contains(".mp4?") || lower.contains(".webm?")
         if (!isFile) return null

@@ -59,6 +59,7 @@ fun StreamPlayer(
     val context = LocalContext.current
     var retryNonce by remember(pageUrl) { mutableIntStateOf(0) }
     var autoRefreshed by remember(pageUrl) { mutableIntStateOf(0) }
+    var playbackRecoveryAttempts by remember(pageUrl) { mutableIntStateOf(0) }
     var session by remember(pageUrl) { mutableStateOf<PlaybackSession?>(null) }
     var selected by remember(pageUrl) { mutableIntStateOf(-1) }
     var resolving by remember(pageUrl) { mutableStateOf(true) }
@@ -105,13 +106,20 @@ fun StreamPlayer(
         player = p
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                resumeMs = p.currentPosition.coerceAtLeast(0L)
                 if (PlaybackResolver.isExpiredLink(error) && autoRefreshed < 1) {
-                    // The link probably expired. Extract it again once, from the same position.
+                    // Signed media URLs can expire shortly after playback starts.
                     autoRefreshed++
-                    resumeMs = p.currentPosition.coerceAtLeast(0L)
+                    retryNonce++
+                } else if (playbackRecoveryAttempts < 1) {
+                    // Re-resolve once for transient CDN/network failures before giving up.
+                    playbackRecoveryAttempts++
                     retryNonce++
                 } else {
-                    playerError = PlaybackResolver.describe(error)
+                    // Stop the failed extractor player before opening the source page in WebView.
+                    session = null
+                    playerError = null
+                    browserFallback = true
                 }
             }
         }
@@ -201,6 +209,7 @@ fun StreamPlayer(
                 errorMessage = playerError,
                 onRetry = {
                     autoRefreshed = 0
+                    playbackRecoveryAttempts = 0
                     retryNonce++
                 }
             )
