@@ -49,6 +49,103 @@ import kotlinx.coroutines.CancellationException
  * - a quality change: the player is rebuilt at the same position;
  * - a network or extraction error: a readable message with a retry button.
  */
+private const val SMART_VIDEO_FOCUS_SCRIPT = """
+(function () {
+  if (window.__sariFocusObserver) return;
+
+  function findAndLock() {
+    var nodes = Array.prototype.slice.call(document.querySelectorAll('video, iframe'));
+    var candidates = nodes.filter(function (el) {
+      var r = el.getBoundingClientRect();
+      var s = window.getComputedStyle(el);
+      var cls = typeof el.className === 'string' ? el.className : '';
+      var hint = ((el.id || '') + ' ' + cls + ' ' + (el.getAttribute('src') || '')).toLowerCase();
+      if (/doubleclick|googlesyndication|\/ads?\/|banner/.test(hint)) return false;
+      if (s.display === 'none' || s.visibility === 'hidden' || r.width < 180 || r.height < 100) return false;
+      var isVideo = el.tagName.toLowerCase() === 'video';
+      var looksLikePlayer = /player|video|embed|stream/.test(hint);
+      var landscapeFrame = r.width > 280 && r.height > 160 &&
+        r.width / Math.max(r.height, 1) > 1.15 && r.width / Math.max(r.height, 1) < 2.5;
+      return isVideo || looksLikePlayer || landscapeFrame;
+    });
+
+    if (!candidates.length) return false;
+    candidates.sort(function (a, b) {
+      var ar = a.getBoundingClientRect();
+      var br = b.getBoundingClientRect();
+      var av = a.tagName.toLowerCase() === 'video' ? 1.5 : 1;
+      var bv = b.tagName.toLowerCase() === 'video' ? 1.5 : 1;
+      return (br.width * br.height * bv) - (ar.width * ar.height * av);
+    });
+
+    var target = candidates[0];
+    var frame = target;
+    for (var i = 0; i < 4; i++) {
+      var parent = frame.parentElement;
+      if (!parent || parent === document.body) break;
+      var pr = parent.getBoundingClientRect();
+      var tr = target.getBoundingClientRect();
+      var pc = typeof parent.className === 'string' ? parent.className : '';
+      var meta = ((parent.id || '') + ' ' + pc).toLowerCase();
+      if (/player|video|embed|stream/.test(meta) ||
+          (pr.width >= tr.width * 0.95 && pr.height <= tr.height * 1.9)) {
+        frame = parent;
+      } else {
+        break;
+      }
+    }
+
+    var branch = frame;
+    while (branch && branch !== document.body && branch.parentElement) {
+      var owner = branch.parentElement;
+      Array.prototype.forEach.call(owner.children, function (sibling) {
+        if (sibling !== branch && !sibling.contains(target) && !target.contains(sibling)) {
+          sibling.style.setProperty('display', 'none', 'important');
+        }
+      });
+      branch = owner;
+    }
+
+    ['position','fixed','left','0','top','0','right','0','bottom','0',
+     'width','100vw','height','100vh','max-width','100vw','max-height','100vh',
+     'margin','0','padding','0','overflow','hidden','z-index','2147483646','background','#000']
+      .reduce(function (unused, value, index, all) {
+        if (index % 2 === 0) frame.style.setProperty(value, all[index + 1], 'important');
+        return unused;
+      }, null);
+
+    target.style.setProperty('width', '100%', 'important');
+    target.style.setProperty('height', '100%', 'important');
+    target.style.setProperty('max-width', '100%', 'important');
+    target.style.setProperty('max-height', '100%', 'important');
+    if (target.tagName.toLowerCase() === 'video') {
+      target.style.setProperty('object-fit', 'contain', 'important');
+    }
+
+    document.documentElement.style.setProperty('overflow', 'hidden', 'important');
+    document.body.style.setProperty('overflow', 'hidden', 'important');
+    document.body.style.setProperty('position', 'fixed', 'important');
+    document.body.style.setProperty('inset', '0', 'important');
+    document.body.style.setProperty('width', '100vw', 'important');
+    document.body.style.setProperty('height', '100vh', 'important');
+    document.body.style.setProperty('margin', '0', 'important');
+    document.body.style.setProperty('background', '#000', 'important');
+    window.scrollTo(0, 0);
+    return true;
+  }
+
+  var tries = 0;
+  var timer = setInterval(function () {
+    tries++;
+    if (findAndLock() || tries >= 40) clearInterval(timer);
+  }, 500);
+
+  var observer = new MutationObserver(function () { findAndLock(); });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  window.__sariFocusObserver = observer;
+})();
+"""
+
 @Composable
 fun StreamPlayer(
     pageUrl: String,
@@ -233,13 +330,21 @@ private fun BrowserPlaybackPage(pageUrl: String, title: String, onBack: () -> Un
             settings.allowContentAccess = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             webChromeClient = WebChromeClient()
-            webViewClient = WebViewClient()
+            CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    CookieManager.getInstance().flush()
+                    view?.evaluateJavascript(SMART_VIDEO_FOCUS_SCRIPT, null)
+                }
+            }
             loadUrl(pageUrl)
         }
     }
     DisposableEffect(webView) {
         onDispose {
+            CookieManager.getInstance().flush()
             webView.stopLoading()
             webView.loadUrl("about:blank")
             webView.removeAllViews()

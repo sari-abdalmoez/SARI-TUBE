@@ -63,6 +63,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import com.sari.tube.engine.PageScraper
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.util.Locale
 
 /** Search results for films and series. Each item comes from TMDB, AniList or TVMaze. */
@@ -378,14 +380,17 @@ fun WatchResultsPanel(
             // Each page is checked in parallel. A page that does not answer in time counts as unverified.
             // Verify a limited first batch. Do not discard other search candidates:
             // yt-dlp and the hidden browser can still resolve them when the user opens one.
-            val toVerify = usable.take(12)
+            val toVerify = usable.take(6)
+            val verifySemaphore = Semaphore(2)
             val checks = coroutineScope {
                 toVerify.map { item ->
                     async {
-                        val ok = withTimeoutOrNull(12_000L) {
-                            PageScraper.hasPlayableVideo(item.url)
-                        } ?: false
-                        item to ok
+                        verifySemaphore.withPermit {
+                            val ok = withTimeoutOrNull(10_000L) {
+                                PageScraper.hasPlayableVideo(item.url)
+                            } ?: false
+                            item to ok
+                        }
                     }
                 }.awaitAll()
             }

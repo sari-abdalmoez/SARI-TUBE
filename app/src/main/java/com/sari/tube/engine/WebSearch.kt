@@ -82,12 +82,15 @@ object WebSearch {
     }
 
     private suspend fun collect(queries: List<String>): List<SearchHit> = coroutineScope {
-        queries.flatMap { q ->
-            listOf(
-                async(Dispatchers.IO) { searchDuckDuckGo(q) },
-                async(Dispatchers.IO) { searchBing(q) }
-            )
-        }.awaitAll().flatten()
+        val combined = ArrayList<SearchHit>()
+        for (query in queries) {
+            val batch = listOf(
+                async(Dispatchers.IO) { searchDuckDuckGo(query) },
+                async(Dispatchers.IO) { searchBing(query) }
+            ).awaitAll()
+            combined.addAll(batch.flatten())
+        }
+        combined
     }
 
     private fun ranked(query: String, hits: List<SearchHit>): List<VideoItem> {
@@ -140,7 +143,7 @@ object WebSearch {
             .userAgent(USER_AGENT)
             .referrer("https://duckduckgo.com/")
             .timeout(9_000)
-            .maxBodySize(2 * 1024 * 1024)
+            .maxBodySize(1024 * 1024)
             .get()
 
         val out = ArrayList<SearchHit>()
@@ -165,7 +168,7 @@ object WebSearch {
             .userAgent(USER_AGENT)
             .referrer("https://www.bing.com/")
             .timeout(9_000)
-            .maxBodySize(2 * 1024 * 1024)
+            .maxBodySize(1024 * 1024)
             .ignoreContentType(true)
             .execute()
             .body()

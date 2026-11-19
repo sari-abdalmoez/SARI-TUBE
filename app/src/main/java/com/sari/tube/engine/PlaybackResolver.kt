@@ -52,7 +52,11 @@ data class PlaybackSession(
  * Failure shown to the user in Arabic. [canRetryWithBrowser] is true when the page may still hold
  * a video that a browser can reveal. It is false for DRM, login-only, private or removed content.
  */
-class ResolveException(message: String, val canRetryWithBrowser: Boolean = false) : Exception(message)
+class ResolveException(
+    message: String,
+    val canRetryWithBrowser: Boolean = false,
+    val openBrowserImmediately: Boolean = false
+) : Exception(message)
 
 object PlaybackResolver {
     private const val TIMEOUT_MS = 60_000L
@@ -82,7 +86,7 @@ object PlaybackResolver {
         try {
             return extract(pageUrl)
         } catch (e: ResolveException) {
-            if (!e.canRetryWithBrowser) throw e
+            if (!e.canRetryWithBrowser || e.openBrowserImmediately) throw e
         }
         PageScraper.scrape(pageUrl)?.let { return single(pageUrl, it) }
         PageSniffer.sniff(context, pageUrl)?.let { return single(pageUrl, it) }
@@ -283,7 +287,11 @@ object PlaybackResolver {
             m.contains("DRM", ignoreCase = true) ->
                 ResolveException("هذا الموقع محمي بتقنية DRM، ولا يمكن تشغيله داخل التطبيق.")
             m.contains("private", true) || m.contains("sign in", true) || m.contains("log in", true) ->
-                ResolveException("هذا المحتوى خاص أو يتطلب تسجيل دخول.")
+                ResolveException(
+                    "هذا الموقع يتطلب تسجيل الدخول. سجّل الدخول في صفحة الموقع ثم شغّل الفيديو.",
+                    canRetryWithBrowser = true,
+                    openBrowserImmediately = true
+                )
             m.contains("not available", true) || m.contains("unavailable", true) || m.contains("removed", true) ->
                 ResolveException("المحتوى غير متاح حالياً أو تمت إزالته.")
             else -> ResolveException("لم يتعرف المستخرج على فيديو في هذه الصفحة.", canRetryWithBrowser = true)

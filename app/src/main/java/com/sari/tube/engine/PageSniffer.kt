@@ -65,6 +65,8 @@ object PageSniffer {
 
         val view = withContext(Dispatchers.Main) {
             WebView(context).apply {
+                CookieManager.getInstance().setAcceptCookie(true)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.mediaPlaybackRequiresUserGesture = false
@@ -83,6 +85,7 @@ object PageSniffer {
 
                     override fun onPageFinished(view: WebView?, url: String?) {
                         view?.evaluateJavascript(START_SCRIPT, null)
+                        CookieManager.getInstance().flush()
                     }
                 }
                 loadUrl(pageUrl)

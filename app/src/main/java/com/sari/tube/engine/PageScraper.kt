@@ -17,7 +17,7 @@ import java.net.URL
 object PageScraper {
     private const val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
-    private const val MAX_CHECKS = 10
+    private const val MAX_CHECKS = 3
 
     /** Streaming services that use DRM. Their video cannot be played outside their own apps. */
     private val DRM_HOSTS = listOf(
@@ -47,7 +47,7 @@ object PageScraper {
         collect(doc, pageUrl, found)
 
         // Many sites put the player in an iframe, so the first few frames are read too.
-        doc.select("iframe[src]").take(3).forEach { frame ->
+        doc.select("iframe[src]").take(1).forEach { frame ->
             val src = frame.absUrl("src")
             if (src.startsWith("http")) {
                 fetch(src, pageUrl)?.let { collect(it, src, found) }
@@ -91,7 +91,7 @@ object PageScraper {
         // Reuse the downloaded document instead of downloading the same page again.
         val found = LinkedHashSet<Candidate>()
         collect(doc, pageUrl, found)
-        doc.select("iframe[src]").take(3).forEach { frame ->
+        doc.select("iframe[src]").take(1).forEach { frame ->
             val src = frame.absUrl("src")
             if (src.startsWith("http")) {
                 fetch(src, pageUrl)?.let { collect(it, src, found) }
@@ -140,7 +140,8 @@ object PageScraper {
         Jsoup.connect(url)
             .userAgent(USER_AGENT)
             .referrer(referer)
-            .timeout(15_000)
+            .timeout(6_000)
+            .maxBodySize(1024 * 1024)
             .followRedirects(true)
             .get()
     }.getOrNull()
@@ -152,8 +153,8 @@ object PageScraper {
         var conn: HttpURLConnection? = null
         return try {
             conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 10_000
-                readTimeout = 10_000
+                connectTimeout = 4_000
+                readTimeout = 4_000
                 requestMethod = "GET"
                 setRequestProperty("User-Agent", USER_AGENT)
                 setRequestProperty("Referer", referer)
