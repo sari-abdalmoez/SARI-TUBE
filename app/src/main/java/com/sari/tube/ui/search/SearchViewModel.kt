@@ -219,7 +219,7 @@ class SearchViewModel(private val saved: SavedStateHandle) : ViewModel() {
                     safeSearch { YtDlpSearch.search(q, count) }
                 }
                 val web = async {
-                    safeSearch { WebSearch.search(q) }
+                    safeSearch { webPlayable(q) }
                 }
 
                 val ytItems = youtube.await().getOrElse { emptyList() }
@@ -235,11 +235,23 @@ class SearchViewModel(private val saved: SavedStateHandle) : ViewModel() {
             }
 
             SearchTab.SONGS, SearchTab.VIDEOS -> YtDlpSearch.search(q, count)
-            SearchTab.WEB -> WebSearch.search(q)
-            SearchTab.TIKTOK -> WebSearch.search(q, "tiktok")
-            SearchTab.FACEBOOK -> WebSearch.search(q, "facebook")
+            SearchTab.WEB -> webPlayable(q)
+            SearchTab.TIKTOK -> webPlayable(q, "tiktok")
+            SearchTab.FACEBOOK -> webPlayable(q, "facebook")
             SearchTab.LOCAL, SearchTab.MOVIES -> emptyList()
         }
+    }
+
+    /**
+     * Web pages with a verified video. Pages that were not checked, or that are empty, need sign-in,
+     * or are DRM-protected, are never listed as results.
+     */
+    private suspend fun webPlayable(q: String, site: String? = null): List<VideoItem> {
+        val scan = WebSearch.searchPlayable(q, site)
+        if (scan.playable.isNotEmpty()) return scan.playable
+        throw SearchException(
+            "لم نتمكن من التأكد من وجود فيديو في الصفحات التي وجدناها. جرّب كتابة الاسم بالإنجليزية أو عبارة أخرى."
+        )
     }
 
     private suspend fun <T> safeSearch(block: suspend () -> T): Result<T> {

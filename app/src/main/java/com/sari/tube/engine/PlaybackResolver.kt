@@ -51,6 +51,8 @@ data class PlaybackSession(
 /**
  * Failure shown to the user in Arabic. [canRetryWithBrowser] is true when the page may still hold
  * a video that a browser can reveal. It is false for DRM, login-only, private or removed content.
+ * [openBrowserImmediately] marks a sign-in page: the other extraction steps are skipped for it.
+ * It never opens a browser by itself; the user chooses that from the error panel.
  */
 class ResolveException(
     message: String,

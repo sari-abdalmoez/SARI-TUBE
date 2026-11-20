@@ -5,20 +5,48 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
-/** Multi-engine web discovery with strict relevance and adult-content filtering. */
+/** Web results after each page was checked for a real video. */
+data class WebScan(
+    /** Pages with a verified direct video link. Only these are offered as playable. */
+    val playable: List<VideoItem>,
+    /** Pages that could not be checked in time because of the network. Shown separately, marked as unverified. */
+    val uncertain: List<VideoItem>,
+    /** Pages checked and rejected: empty, login required, DRM, or an error answer. */
+    val rejected: Int
+)
+
+/**
+ * Multi-engine web discovery. A page is only returned when it has a verified video, so empty pages,
+ * sign-in pages and DRM pages are never offered as results.
+ */
 object WebSearch {
     private const val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
     private const val MAX_RESULTS = 24
 
-    // User-provided fallback sources. They are queried only after normal search returns no
-    // relevant result; results still have to match the title and pass the safety filter.
+    /** Search queries that run at the same time. Each one asks two engines. */
+    private const val QUERY_PARALLEL = 3
+
+    /** Pages checked per phase, how many run at once, and the time allowed for the whole phase. */
+    private const val VERIFY_LIMIT = 8
+    private const val VERIFY_PARALLEL = 3
+    private const val VERIFY_BUDGET_MS = 10_000L
+
+    /** Unverified pages listed under the verified ones, so the list stays short on weak phones. */
+    private const val UNCERTAIN_LIMIT = 4
+
+    // User-provided fallback sources. They are queried only when the normal search has no page with a
+    // playable video. Their results still have to match the title and pass the safety filter.
     private val FALLBACK_SITES = listOf(
         "latino.solo-latino.com",
         "flixlat.com",
@@ -47,58 +75,125 @@ object WebSearch {
 
     private data class SearchHit(val item: VideoItem, val context: String)
 
-    suspend fun search(query: String, site: String? = null): List<VideoItem> =
-        withContext(Dispatchers.IO) {
-            val clean = query.trim()
-            if (clean.isBlank()) throw SearchException("اكتب اسم الفيلم أو المسلسل أولاً.")
+    /** A candidate page with how many query words its title or address matched. */
+    private data class Scored(val item: VideoItem, val score: Int)
 
-            val scoped = when (site) {
-                "tiktok" -> "site:tiktok.com $clean"
-                "facebook" -> "site:facebook.com $clean"
-                else -> clean
-            }
-            // Avoid broad generic phrases such as "full movie online" that introduce unrelated pages.
-            val primaryQueries = listOf(scoped, "\"$clean\" watch online").distinct()
-            val normalResults = ranked(clean, collect(primaryQueries))
-            if (normalResults.isNotEmpty()) return@withContext normalResults.take(MAX_RESULTS)
+    /**
+     * Searches the web and checks the pages. Pages that cannot show a video are dropped.
+     * Playable pages keep the order of their match to the query.
+     * Throws [SearchException] when nothing playable and nothing uncertain was found.
+     */
+    suspend fun searchPlayable(query: String, site: String? = null): WebScan {
+        val clean = query.trim()
+        if (clean.isBlank()) throw SearchException("اكتب اسم الفيلم أو المسلسل أولاً.")
 
-            // Search the supplied source domains only as a fallback, and never return their
-            // home pages unless their result title/path actually relates to the requested title.
-            if (site == null) {
-                val siteQueries = FALLBACK_SITES.map { "site:$it \"$clean\"" }
-                val fallback = ranked(clean, collect(siteQueries))
-                if (fallback.isNotEmpty()) return@withContext fallback.take(MAX_RESULTS)
-            }
+        val primaryItems = rankedCandidates(clean, primaryQueries(clean, site))
+        var scan = verify(primaryItems)
 
-            throw SearchException(
-                "لم نعثر على صفحات مرتبطة بهذا العنوان. جرّب كتابة الاسم بالإنجليزية أو ابحث لاحقاً."
+        // The fallback sources are used only when the normal search gives no playable page.
+        if (scan.playable.isEmpty() && site == null) {
+            val known = primaryItems.map { it.item.url }.toHashSet()
+            val fallbackItems = rankedCandidates(
+                clean,
+                FALLBACK_SITES.map { "site:$it \"$clean\"" }
+            ).filter { it.item.url !in known }
+            val extra = verify(fallbackItems)
+            scan = WebScan(
+                playable = scan.playable + extra.playable,
+                uncertain = scan.uncertain + extra.uncertain,
+                rejected = scan.rejected + extra.rejected
             )
         }
 
-    /** Defense-in-depth check used again by the watch-results screen. */
-    fun isRelevantAndSafe(query: String, item: VideoItem): Boolean {
-        if (isAdult(item, "")) return false
-        return isRelevant(query, item, "")
-    }
-
-    private suspend fun collect(queries: List<String>): List<SearchHit> = coroutineScope {
-        val combined = ArrayList<SearchHit>()
-        for (query in queries) {
-            val batch = listOf(
-                async(Dispatchers.IO) { searchDuckDuckGo(query) },
-                async(Dispatchers.IO) { searchBing(query) }
-            ).awaitAll()
-            combined.addAll(batch.flatten())
+        if (scan.playable.isEmpty() && scan.uncertain.isEmpty()) {
+            throw SearchException(
+                "لم نجد صفحات تحتوي فيديو قابلاً للتشغيل لهذا العنوان. جرّب كتابة الاسم بالإنجليزية أو ابحث لاحقاً."
+            )
         }
-        combined
+        return scan
     }
 
-    private fun ranked(query: String, hits: List<SearchHit>): List<VideoItem> {
+    private fun primaryQueries(clean: String, site: String?): List<String> {
+        val scoped = when (site) {
+            "tiktok" -> "site:tiktok.com $clean"
+            "facebook" -> "site:facebook.com $clean"
+            else -> clean
+        }
+        // Avoid broad generic phrases such as "full movie online" that introduce unrelated pages.
+        return listOf(scoped, "\"$clean\" watch online").distinct()
+    }
+
+    /** Checks up to [VERIFY_LIMIT] candidates in parallel within a time budget. */
+    private suspend fun verify(items: List<Scored>): WebScan {
+        if (items.isEmpty()) return WebScan(emptyList(), emptyList(), 0)
+
+        val toCheck = items.take(VERIFY_LIMIT)
+        val notChecked = items.drop(VERIFY_LIMIT).map { it.item }
+        val statuses = ConcurrentHashMap<String, PageCheck>()
+        val gate = Semaphore(VERIFY_PARALLEL)
+
+        // Pages that finish before the budget keep their status. The rest stay unknown.
+        withTimeoutOrNull(VERIFY_BUDGET_MS) {
+            coroutineScope {
+                toCheck.forEach { scored ->
+                    launch(Dispatchers.IO) {
+                        gate.withPermit {
+                            statuses[scored.item.url] = PageScraper.check(scored.item.url)
+                        }
+                    }
+                }
+            }
+        }
+
+        val playable = toCheck
+            .filter { statuses[it.item.url] == PageCheck.PLAYABLE }
+            .map { it.item }
+        val rejected = toCheck.count { scored ->
+            val status = statuses[scored.item.url]
+            status != null && status != PageCheck.PLAYABLE && status != PageCheck.NETWORK_ERROR
+        }
+        val uncertain = (
+            toCheck
+                .filter { scored ->
+                    val status = statuses[scored.item.url]
+                    status == null || status == PageCheck.NETWORK_ERROR
+                }
+                .map { it.item } + notChecked
+            ).take(UNCERTAIN_LIMIT)
+
+        return WebScan(playable = playable, uncertain = uncertain, rejected = rejected)
+    }
+
+    private suspend fun rankedCandidates(query: String, queries: List<String>): List<Scored> =
+        ranked(query, collect(queries)).take(MAX_RESULTS)
+
+    /** Runs the queries with a small limit on how many run at once. Each query asks DuckDuckGo and Bing. */
+    private suspend fun collect(queries: List<String>): List<SearchHit> = coroutineScope {
+        val gate = Semaphore(QUERY_PARALLEL)
+        queries.map { query ->
+            async(Dispatchers.IO) {
+                gate.withPermit {
+                    coroutineScope {
+                        val duck = async(Dispatchers.IO) { searchDuckDuckGo(query) }
+                        val bing = async(Dispatchers.IO) { searchBing(query) }
+                        duck.await() + bing.await()
+                    }
+                }
+            }
+        }.awaitAll().flatten()
+    }
+
+    /** Keeps relevant, safe, unique pages, best match first. */
+    private fun ranked(query: String, hits: List<SearchHit>): List<Scored> {
+        val required = requiredMatches(query)
+        if (required == 0) return emptyList()
         val seen = HashSet<String>()
         return hits.asSequence()
-            .filter { isRelevantAndSafe(query, it.item) && !isAdult(it.item, it.context) }
+            .filter { !isAdult(it.item, it.context) }
+            .map { Scored(it.item, matchCount(query, it.item, it.context)) }
+            .filter { it.score >= required }
             .filter { seen.add(it.item.url.substringBefore('#').trimEnd('/')) }
-            .map { it.item }
+            .sortedByDescending { it.score }
             .toList()
     }
 
@@ -110,19 +205,23 @@ object WebSearch {
         return ADULT_TEXT_MARKERS.any { text.contains(it, ignoreCase = true) }
     }
 
-    private fun isRelevant(query: String, item: VideoItem, context: String): Boolean {
+    /**
+     * Words of the query found in the title, address or snippet. Two words are required for a title
+     * of two or more words. A one-word title must match that word. Host names are not used as a match.
+     */
+    private fun requiredMatches(query: String): Int {
         val wanted = tokens(query)
-        if (wanted.isEmpty()) return false
+        return if (wanted.isEmpty()) 0 else minOf(2, wanted.size)
+    }
 
+    private fun matchCount(query: String, item: VideoItem, context: String): Int {
+        val wanted = tokens(query)
+        if (wanted.isEmpty()) return 0
         val uri = Uri.parse(item.url)
         val pageText = item.title + " " + uri.path.orEmpty() + " " +
             uri.query.orEmpty().replace('+', ' ') + " " + context
         val available = tokens(pageText).toHashSet()
-        val matches = wanted.count { it in available }
-        // Require both words for a two-word title, or at least two words for longer titles.
-        // A one-word title must match that word. Host names are intentionally not used as a match.
-        val required = minOf(2, wanted.size)
-        return matches >= required
+        return wanted.count { it in available }
     }
 
     private fun tokens(value: String): List<String> =

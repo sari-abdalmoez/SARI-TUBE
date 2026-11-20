@@ -115,8 +115,9 @@ object PageSniffer {
     }
 
     private fun mediaStreamFor(request: WebResourceRequest, pageUrl: String): PlaybackStream? {
-        if (!request.method.equals("GET", ignoreCase = true)) return null
+        if (!"GET".equals(request.method, ignoreCase = true)) return null
         val uri = request.url ?: return null
+        val requestHeaders: Map<String, String> = request.requestHeaders.orEmpty()
         val full = uri.toString()
         val path = uri.path?.lowercase().orEmpty()
         val lower = full.lowercase()
@@ -128,7 +129,7 @@ object PageSniffer {
         )
         if (fragmentMarkers.any { lower.contains(it) }) return null
 
-        val accept = request.requestHeaders.entries.firstOrNull {
+        val accept = requestHeaders.entries.firstOrNull {
             it.key.equals("Accept", true)
         }?.value.orEmpty()
         val manifestPath = path.contains("manifest") || path.contains("playlist") ||
@@ -145,11 +146,11 @@ object PageSniffer {
         if (!isFile) return null
 
         val headers = LinkedHashMap<String, String>()
-        request.requestHeaders?.forEach { (name, value) ->
+        requestHeaders.forEach { (name, value) ->
             if (name.lowercase() !in BLOCKED_HEADERS) headers[name] = value
         }
         headers.putIfAbsent("Referer", pageUrl)
-        headers.putIfAbsent("User-Agent", request.requestHeaders.entries.firstOrNull {
+        headers.putIfAbsent("User-Agent", requestHeaders.entries.firstOrNull {
             it.key.equals("User-Agent", true)
         }?.value ?: "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36")
         CookieManager.getInstance().getCookie(full)

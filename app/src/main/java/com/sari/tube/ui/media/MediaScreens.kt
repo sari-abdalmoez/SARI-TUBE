@@ -57,14 +57,7 @@ import com.sari.tube.engine.UnifiedMediaItem
 import com.sari.tube.engine.VideoItem
 import com.sari.tube.engine.WebSearch
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.withTimeoutOrNull
-import com.sari.tube.engine.PageScraper
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import java.util.Locale
 
 /** Search results for films and series. Each item comes from TMDB, AniList or TVMaze. */
@@ -362,41 +355,23 @@ fun WatchResultsPanel(
 ) {
     var verified by remember(query) { mutableStateOf<List<VideoItem>?>(null) }
     var unverified by remember(query) { mutableStateOf<List<VideoItem>>(emptyList()) }
-    var filteredHidden by remember(query) { mutableIntStateOf(0) }
+    var rejected by remember(query) { mutableIntStateOf(0) }
     var error by remember(query) { mutableStateOf<String?>(null) }
     var loading by remember(query) { mutableStateOf(true) }
     var attempt by remember(query) { mutableIntStateOf(0) }
 
+    // Runs only while this screen is shown: leaving the screen cancels the search and the page checks.
     LaunchedEffect(query, attempt) {
         loading = true
         error = null
         verified = null
         try {
-            val raw = WebSearch.search(query)
-            val usable = raw.filter {
-                WebSearch.isRelevantAndSafe(query, it) && !PageScraper.isDrmSite(it.url)
-            }
-            filteredHidden = raw.size - usable.size
-            // Each page is checked in parallel. A page that does not answer in time counts as unverified.
-            // Verify a limited first batch. Do not discard other search candidates:
-            // yt-dlp and the hidden browser can still resolve them when the user opens one.
-            val toVerify = usable.take(6)
-            val verifySemaphore = Semaphore(2)
-            val checks = coroutineScope {
-                toVerify.map { item ->
-                    async {
-                        verifySemaphore.withPermit {
-                            val ok = withTimeoutOrNull(10_000L) {
-                                PageScraper.hasPlayableVideo(item.url)
-                            } ?: false
-                            item to ok
-                        }
-                    }
-                }.awaitAll()
-            }
-            verified = checks.filter { it.second }.map { it.first }
-            unverified = checks.filterNot { it.second }.map { it.first } +
-                usable.drop(toVerify.size)
+            // Only pages with a verified video are listed as playable. The rest are shown as unverified
+            // or left out, depending on the reason.
+            val scan = WebSearch.searchPlayable(query)
+            verified = scan.playable
+            unverified = scan.uncertain
+            rejected = scan.rejected
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -417,7 +392,7 @@ fun WatchResultsPanel(
             }
         }
         Text(
-            "تم استبعاد المواقع المحمية (DRM). الصفحات الأولى فيها فيديو تم التحقق منه.",
+            "تم استبعاد الصفحات الفارغة وصفحات تسجيل الدخول والمحمية (DRM). تظهر هنا الصفحات التي تحتوي فيديو تم التحقق منه.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             modifier = Modifier.padding(vertical = 6.dp)
@@ -449,10 +424,10 @@ fun WatchResultsPanel(
             else -> {
                 val good = verified.orEmpty()
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (filteredHidden > 0) {
+                    if (rejected > 0) {
                         item {
                             Text(
-                                "أُخفيت $filteredHidden صفحة غير مرتبطة بالبحث أو غير مناسبة أو محمية بـ DRM",
+                                "استُبعدت $rejected صفحة لأنها فارغة أو تتطلب تسجيل دخول أو محمية",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp
                             )
@@ -472,7 +447,7 @@ fun WatchResultsPanel(
                     if (unverified.isNotEmpty()) {
                         item {
                             Text(
-                                "صفحات لم نتأكد من وجود فيديو فيها",
+                                "صفحات لم نتمكن من التحقق منها (تأخر الرد أو انقطع الاتصال)",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -507,7 +482,7 @@ private fun WatchRow(item: VideoItem, verified: Boolean, onPlay: (VideoItem) -> 
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            if (verified) item.channel else "${item.channel} • صفحة مرشحة - التحقق عند التشغيل",
+            if (verified) item.channel else "${item.channel} • غير متحقق منها بعد",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             maxLines = 1

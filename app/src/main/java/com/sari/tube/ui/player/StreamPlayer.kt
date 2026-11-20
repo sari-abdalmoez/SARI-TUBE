@@ -1,14 +1,8 @@
 package com.sari.tube.ui.player
 
 import androidx.activity.compose.BackHandler
-import android.webkit.CookieManager
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -17,12 +11,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -40,112 +33,24 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.sari.tube.engine.PlaybackResolver
 import com.sari.tube.engine.PlaybackSession
+import com.sari.tube.engine.ResolveException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+
+/** A failure shown on the error panel. [canOpenBrowser] offers the page in the embedded browser by choice. */
+private data class StreamError(val message: String, val canOpenBrowser: Boolean)
 
 /**
- * Plays a web page (for example a YouTube result). It extracts the media URL, plays it, and handles
- * the common failures:
+ * Plays a web page (for example a search result). It extracts the media URL, plays it, and handles the
+ * common failures:
  * - a link that expired (the server returns 403): extracted again once, keeping the position;
  * - a quality change: the player is rebuilt at the same position;
  * - a network or extraction error: a readable message with a retry button.
+ *
+ * The page is never opened in a browser by itself. When extraction fails, the error panel offers the
+ * embedded browser as a choice, and the user decides.
  */
-private const val SMART_VIDEO_FOCUS_SCRIPT = """
-(function () {
-  if (window.__sariFocusObserver) return;
-
-  function findAndLock() {
-    var nodes = Array.prototype.slice.call(document.querySelectorAll('video, iframe'));
-    var candidates = nodes.filter(function (el) {
-      var r = el.getBoundingClientRect();
-      var s = window.getComputedStyle(el);
-      var cls = typeof el.className === 'string' ? el.className : '';
-      var hint = ((el.id || '') + ' ' + cls + ' ' + (el.getAttribute('src') || '')).toLowerCase();
-      if (/doubleclick|googlesyndication|\/ads?\/|banner/.test(hint)) return false;
-      if (s.display === 'none' || s.visibility === 'hidden' || r.width < 180 || r.height < 100) return false;
-      var isVideo = el.tagName.toLowerCase() === 'video';
-      var looksLikePlayer = /player|video|embed|stream/.test(hint);
-      var landscapeFrame = r.width > 280 && r.height > 160 &&
-        r.width / Math.max(r.height, 1) > 1.15 && r.width / Math.max(r.height, 1) < 2.5;
-      return isVideo || looksLikePlayer || landscapeFrame;
-    });
-
-    if (!candidates.length) return false;
-    candidates.sort(function (a, b) {
-      var ar = a.getBoundingClientRect();
-      var br = b.getBoundingClientRect();
-      var av = a.tagName.toLowerCase() === 'video' ? 1.5 : 1;
-      var bv = b.tagName.toLowerCase() === 'video' ? 1.5 : 1;
-      return (br.width * br.height * bv) - (ar.width * ar.height * av);
-    });
-
-    var target = candidates[0];
-    var frame = target;
-    for (var i = 0; i < 4; i++) {
-      var parent = frame.parentElement;
-      if (!parent || parent === document.body) break;
-      var pr = parent.getBoundingClientRect();
-      var tr = target.getBoundingClientRect();
-      var pc = typeof parent.className === 'string' ? parent.className : '';
-      var meta = ((parent.id || '') + ' ' + pc).toLowerCase();
-      if (/player|video|embed|stream/.test(meta) ||
-          (pr.width >= tr.width * 0.95 && pr.height <= tr.height * 1.9)) {
-        frame = parent;
-      } else {
-        break;
-      }
-    }
-
-    var branch = frame;
-    while (branch && branch !== document.body && branch.parentElement) {
-      var owner = branch.parentElement;
-      Array.prototype.forEach.call(owner.children, function (sibling) {
-        if (sibling !== branch && !sibling.contains(target) && !target.contains(sibling)) {
-          sibling.style.setProperty('display', 'none', 'important');
-        }
-      });
-      branch = owner;
-    }
-
-    ['position','fixed','left','0','top','0','right','0','bottom','0',
-     'width','100vw','height','100vh','max-width','100vw','max-height','100vh',
-     'margin','0','padding','0','overflow','hidden','z-index','2147483646','background','#000']
-      .reduce(function (unused, value, index, all) {
-        if (index % 2 === 0) frame.style.setProperty(value, all[index + 1], 'important');
-        return unused;
-      }, null);
-
-    target.style.setProperty('width', '100%', 'important');
-    target.style.setProperty('height', '100%', 'important');
-    target.style.setProperty('max-width', '100%', 'important');
-    target.style.setProperty('max-height', '100%', 'important');
-    if (target.tagName.toLowerCase() === 'video') {
-      target.style.setProperty('object-fit', 'contain', 'important');
-    }
-
-    document.documentElement.style.setProperty('overflow', 'hidden', 'important');
-    document.body.style.setProperty('overflow', 'hidden', 'important');
-    document.body.style.setProperty('position', 'fixed', 'important');
-    document.body.style.setProperty('inset', '0', 'important');
-    document.body.style.setProperty('width', '100vw', 'important');
-    document.body.style.setProperty('height', '100vh', 'important');
-    document.body.style.setProperty('margin', '0', 'important');
-    document.body.style.setProperty('background', '#000', 'important');
-    window.scrollTo(0, 0);
-    return true;
-  }
-
-  var tries = 0;
-  var timer = setInterval(function () {
-    tries++;
-    if (findAndLock() || tries >= 40) clearInterval(timer);
-  }, 500);
-
-  var observer = new MutationObserver(function () { findAndLock(); });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-  window.__sariFocusObserver = observer;
-})();
-"""
-
 @Composable
 fun StreamPlayer(
     pageUrl: String,
@@ -160,8 +65,8 @@ fun StreamPlayer(
     var session by remember(pageUrl) { mutableStateOf<PlaybackSession?>(null) }
     var selected by remember(pageUrl) { mutableIntStateOf(-1) }
     var resolving by remember(pageUrl) { mutableStateOf(true) }
-    var resolveError by remember(pageUrl) { mutableStateOf<String?>(null) }
-    var browserFallback by remember(pageUrl) { mutableStateOf(false) }
+    var streamError by remember(pageUrl) { mutableStateOf<StreamError?>(null) }
+    var browserOpen by remember(pageUrl) { mutableStateOf(false) }
     var playerError by remember(pageUrl) { mutableStateOf<String?>(null) }
     var player by remember(pageUrl) { mutableStateOf<ExoPlayer?>(null) }
     var resumeMs by remember(pageUrl) { mutableLongStateOf(0L) }
@@ -169,8 +74,8 @@ fun StreamPlayer(
     // Extracts the qualities. Runs again on retry, and when the link has expired.
     LaunchedEffect(pageUrl, retryNonce) {
         resolving = true
-        resolveError = null
-        browserFallback = false
+        streamError = null
+        browserOpen = false
         playerError = null
         session = null
         try {
@@ -180,12 +85,11 @@ fun StreamPlayer(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (e is com.sari.tube.engine.ResolveException && e.canRetryWithBrowser) {
-                // MSE/blob streams must remain in the browser page that created them.
-                browserFallback = true
-            } else {
-                resolveError = e.message?.takeIf { it.isNotBlank() } ?: "تعذر تشغيل الفيديو."
-            }
+            val resolveError = e as? ResolveException
+            streamError = StreamError(
+                message = e.message?.takeIf { it.isNotBlank() } ?: "تعذر تشغيل الفيديو.",
+                canOpenBrowser = resolveError?.canRetryWithBrowser == true
+            )
         } finally {
             resolving = false
         }
@@ -213,10 +117,13 @@ fun StreamPlayer(
                     playbackRecoveryAttempts++
                     retryNonce++
                 } else {
-                    // Stop the failed extractor player before opening the source page in WebView.
+                    // Stop the failed player and show the options. The browser is offered, never opened.
                     session = null
                     playerError = null
-                    browserFallback = true
+                    streamError = StreamError(
+                        message = PlaybackResolver.describe(error),
+                        canOpenBrowser = true
+                    )
                 }
             }
         }
@@ -265,33 +172,33 @@ fun StreamPlayer(
     val current: ExoPlayer? = player
     val qualities = session?.streams?.map { it.label }.orEmpty()
 
-    BackHandler(enabled = browserFallback, onBack = onBack)
+    // Back leaves the embedded browser and returns to the error panel. It never leaves the screen by itself.
+    BackHandler(enabled = browserOpen) { browserOpen = false }
 
     Box(modifier.fillMaxSize().background(Color.Black)) {
+        val error = streamError
         when {
-            browserFallback -> BrowserPlaybackPage(pageUrl = pageUrl, title = title, onBack = onBack)
+            browserOpen -> EmbeddedBrowserPage(
+                pageUrl = pageUrl,
+                title = title,
+                onClose = { browserOpen = false }
+            )
+
             resolving -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Color(0xFFFFB300))
             }
 
-            resolveError != null -> Column(
-                Modifier.fillMaxSize().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    resolveError.orEmpty(),
-                    color = Color.White,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(16.dp))
-                Button(onClick = {
+            error != null -> ErrorPanel(
+                message = error.message,
+                canOpenBrowser = error.canOpenBrowser,
+                onRetry = {
                     autoRefreshed = 0
+                    playbackRecoveryAttempts = 0
                     retryNonce++
-                }) { Text("إعادة المحاولة") }
-                Spacer(Modifier.height(8.dp))
-                Button(onClick = onBack) { Text("رجوع") }
-            }
+                },
+                onOpenBrowser = { browserOpen = true },
+                onBack = onBack
+            )
 
             current != null -> VideoPlayer(
                 player = current,
@@ -316,50 +223,31 @@ fun StreamPlayer(
     }
 }
 
-
 @Composable
-private fun BrowserPlaybackPage(pageUrl: String, title: String, onBack: () -> Unit) {
-    val context = LocalContext.current
-    val webView = androidx.compose.runtime.remember(pageUrl) {
-        WebView(context).apply {
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            settings.javaScriptCanOpenWindowsAutomatically = false
-            settings.allowFileAccess = false
-            settings.allowContentAccess = false
-            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            webChromeClient = WebChromeClient()
-            CookieManager.getInstance().setAcceptCookie(true)
-            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-            webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    CookieManager.getInstance().flush()
-                    view?.evaluateJavascript(SMART_VIDEO_FOCUS_SCRIPT, null)
-                }
-            }
-            loadUrl(pageUrl)
+private fun ErrorPanel(
+    message: String,
+    canOpenBrowser: Boolean,
+    onRetry: () -> Unit,
+    onOpenBrowser: () -> Unit,
+    onBack: () -> Unit
+) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            message,
+            color = Color.White,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onRetry) { Text("إعادة المحاولة") }
+        if (canOpenBrowser) {
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onOpenBrowser) { Text("فتح الصفحة في المتصفح المدمج") }
         }
-    }
-    DisposableEffect(webView) {
-        onDispose {
-            CookieManager.getInstance().flush()
-            webView.stopLoading()
-            webView.loadUrl("about:blank")
-            webView.removeAllViews()
-            webView.destroy()
-        }
-    }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
-        Column(
-            Modifier.align(Alignment.TopStart).padding(10.dp)
-                .background(Color(0x99000000), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
-                .padding(horizontal = 8.dp, vertical = 6.dp)
-        ) {
-            Button(onClick = onBack) { Text("رجوع للمصادر") }
-            Text(title, color = Color.White, maxLines = 1)
-        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = onBack) { Text("رجوع إلى النتائج") }
     }
 }
